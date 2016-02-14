@@ -1,5 +1,6 @@
 #include "OSVRTracker.h"
 #include "D3DProxyDevice.h"
+#include "Extras/OVR_Math.h"
 
 OSVRTracker::OSVRTracker() :
 	m_Context("com.vireio.OSVRTracker")
@@ -47,6 +48,7 @@ void OSVRTracker::init()
  	}
 
 	m_HeadInterface = m_Context.getInterface("/me/head");
+	m_HeadInterface.registerCallback(&TrackerCallback, this);
 
 	if (status == MTS_INITIALISING)
 		status = MTS_OK;
@@ -54,44 +56,67 @@ void OSVRTracker::init()
 
 void OSVRTracker::resetOrientationAndPosition()
 {
-
+	resetOrientationAndPosition();
 }
 
 void OSVRTracker::resetPosition()
 {
+	offsetX = 0.0f;
+	offsetY = 0.0f;
+	offsetZ = 0.0f;
+}
 
+void OSVRTracker::TrackerCallback(void* userdata, const OSVR_TimeValue* timestamp, const OSVR_PoseReport* report)
+{
+	float x = osvrVec3GetX(&report->pose.translation);
+	float y = osvrVec3GetY(&report->pose.translation);
+	float z = osvrVec3GetZ(&report->pose.translation);
+
+	float qw = osvrQuatGetW(&report->pose.rotation);
+	float qx = osvrQuatGetX(&report->pose.rotation);
+	float qy = osvrQuatGetY(&report->pose.rotation);
+	float qz = osvrQuatGetZ(&report->pose.rotation);
+
+	float yaw = asin(-2.0 * (qx*qz - qw*qy)) * (180.0 / PI);
+	float pitch = atan2(2.0 * (qy*qz + qw*qx), qw*qw - qx*qx - qy*qy + qz*qz) * (180.0 / PI);
+	float roll = atan2(2.0 * (qx*qy + qw*qz), qw*qw + qx*qx - qy*qy - qz*qz) * (180.0 / PI);
+
+	{
+		OSVRTracker* thiz = static_cast<OSVRTracker*>(userdata);
+		std::lock_guard<std::mutex> lock(thiz->m_mtx);
+		thiz->osvr_x = x;
+		thiz->osvr_y = y;
+		thiz->osvr_z = z;
+		thiz->osvr_yaw = yaw;
+		thiz->osvr_pitch = pitch;
+		thiz->osvr_roll = roll;
+	}
 }
 
 int  OSVRTracker::getOrientationAndPosition(float* yaw, float* pitch, float* roll, float* x, float* y, float* z)
 {
 	m_Context.update();
-	
-	OSVR_PoseState state;
-	OSVR_TimeValue timestamp;
-	OSVR_ReturnCode ret = osvrGetPoseState(m_HeadInterface.get(), &timestamp, &state);
-	
-	if (ret == OSVR_RETURN_SUCCESS)
+
 	{
-		*x = osvrVec3GetX(&state.translation);
-		*y = osvrVec3GetY(&state.translation);
-		*z = osvrVec3GetZ(&state.translation);
+		std::lock_guard<std::mutex> lock(m_mtx);
 
-		float qw = osvrQuatGetW(&state.rotation);
-		float qx = osvrQuatGetX(&state.rotation);
-		float qy = osvrQuatGetY(&state.rotation);
-		float qz = osvrQuatGetZ(&state.rotation);
+		primaryYaw = OSVRTracker::osvr_yaw - offsetYaw;
+		primaryPitch = OSVRTracker::osvr_pitch - offsetPitch;
+		primaryRoll = OSVRTracker::osvr_roll - offsetRoll;
 
-		*pitch= atan2(2.0 * (qy*qz + qw*qx), qw*qw - qx*qx - qy*qy + qz*qz) * (180.0 / PI);
-		*yaw  =-asin(-2.0 * (qx*qz - qw*qy)) * (180.0 / PI);
-		*roll = atan2(2.0 * (qx*qy + qw*qz), qw*qw + qx*qx - qy*qy - qz*qz) * (180.0 / PI);
-
-		//vireio::debugf("x: %8.4f, y:%8.4f, z:%8.4f, yaw: %8.4f, pitch: %8.4f, roll: %8.4f");
-		return MTS_OK;
+		primaryX = OSVRTracker::osvr_x - offsetX;
+		primaryY = OSVRTracker::osvr_y - offsetY;
+		primaryZ = OSVRTracker::osvr_z - offsetZ;
 	}
-	else
-	{
-		return MTS_LOSTPOSITIONAL;
-	}
+
+	*yaw = -primaryYaw;
+	*pitch = primaryPitch;
+	*roll = -primaryRoll;
+	*x = primaryX;
+	*y = primaryY;
+	*z = primaryZ;
+
+	return MTS_OK;
 }
 
 void OSVRTracker::updateOrientationAndPosition()
