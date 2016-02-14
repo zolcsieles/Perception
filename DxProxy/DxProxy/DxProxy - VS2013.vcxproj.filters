@@ -245,6 +245,9 @@
     <ClCompile Include="OculusDirectToRiftView.cpp">
       <Filter>Stereo</Filter>
     </ClCompile>
+    <ClCompile Include="OSVRTracker.cpp">
+      <Filter>Tracking</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="Exports.def">
@@ -540,6 +543,15 @@
     <ClInclude Include="..\..\Shared\json\writer.h" />
     <ClInclude Include="OculusDirectToRiftView.h">
       <Filter>Stereo</Filter>
+    </ClInclude>
+    <ClInclude Include="OSVRTracker.h">
+      <Filter>Tracking</Filter>
+    </ClInclude>
+    <ClInclude Include="OSVR_MS_Undef.h">
+      <Filter>Tracking</Filter>
+    </ClInclude>
+    <ClInclude Include="OSVR_MS_Def.h">
+      <Filter>Tracking</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

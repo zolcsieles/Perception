@@ -197,6 +197,7 @@ public:
 		m_aszTrackerOptions.push_back(L"FreeTrack - 20");
 		m_aszTrackerOptions.push_back(L"Shared Memory Tracker - 30");
 		m_aszTrackerOptions.push_back(L"OculusTrack - 40");
+		m_aszTrackerOptions.push_back(L"OSVRTrack - 50");
 		sControl.m_eControlType = Vireio_Control_Type::SpinControl;
 		sControl.m_sPosition.x = 16;
 		sControl.m_sPosition.y = 188;
@@ -659,6 +660,7 @@ bool InitModes()
 	anTrackerModes.push_back(20);
 	anTrackerModes.push_back(30);
 	anTrackerModes.push_back(40);
+	anTrackerModes.push_back(50);
 
 	return true;
 }

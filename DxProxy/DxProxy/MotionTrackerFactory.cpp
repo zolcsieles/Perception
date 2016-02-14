@@ -43,6 +43,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "FreeTrackTracker.h"
 #include "SharedMemoryTracker.h"
 #include "OculusTracker.h"
+#include "OSVRTracker.h"
 
 /**
 *  Get motion tracker. 
@@ -70,6 +71,9 @@ MotionTracker* MotionTrackerFactory::Get(ProxyConfig& config)
 		break;
 	case MotionTracker::OCULUSTRACK:
 		newTracker = new OculusTracker();
+		break;
+	case MotionTracker::OSVRTRACK:
+		newTracker = new OSVRTracker();
 		break;
 	default:
 		newTracker = new MotionTracker();

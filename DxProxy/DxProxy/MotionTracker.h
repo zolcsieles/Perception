@@ -153,7 +153,8 @@ public:
 		HILLCREST = 10,       /**< Hillcrest Labs. Freespace. */
 		FREETRACK = 20,       /**< FreeTrack optical motion tracking. */
 		SHAREDMEMTRACK = 30,  /**< Shared memory tracking. */
-		OCULUSTRACK = 40      /**< Oculus Rift tracking. */
+		OCULUSTRACK = 40,     /**< Oculus Rift tracking. */
+		OSVRTRACK = 50        /**< OSVR tracking */
 	};
 
 protected:
