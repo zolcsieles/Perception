@@ -1315,9 +1315,11 @@ void* StereoSplitter::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 								if (m_apcActiveCSConstantBuffers[dwInternalIndex])
 								{
 									// get private rule index from buffer
-									INT nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
-									UINT dwDataSizeRulesIndex = sizeof(INT);
-									m_apcActiveCSConstantBuffers[dwInternalIndex]->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, &dwDataSizeRulesIndex, &nRulesIndex);
+									Vireio_Buffer_Rules_Index sRulesIndex;
+									sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+									sRulesIndex.m_dwUpdateCounter = 0;
+									UINT dwDataSizeRulesIndex = sizeof(Vireio_Buffer_Rules_Index);
+									m_apcActiveCSConstantBuffers[dwInternalIndex]->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, &dwDataSizeRulesIndex, &sRulesIndex);
 
 									// set twin for right side, first get the private data interface
 									ID3D11Buffer* pcBuffer = nullptr;
@@ -1325,7 +1327,7 @@ void* StereoSplitter::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 									m_apcActiveCSConstantBuffers[dwInternalIndex]->GetPrivateData(PDIID_ID3D11Buffer_Constant_Buffer_Right, &dwSize, (void*)&pcBuffer);
 
 									// stereo buffer and rules index present ?
-									if ((pcBuffer) && (dwDataSizeRulesIndex) && (nRulesIndex >= 0))
+									if ((pcBuffer) && (dwDataSizeRulesIndex) && (sRulesIndex.m_nRulesIndex >= 0))
 									{
 										// set right buffer as active buffer
 										m_apcActiveCSConstantBuffers[dwInternalIndex + D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT] = pcBuffer;
@@ -1641,9 +1643,17 @@ void StereoSplitter::Present(IDXGISwapChain* pcSwapChain)
 					D3D11_VIEWPORT psViewport[16];
 					pcContext->RSGetViewports(&dwNumViewports, psViewport);
 
+					/*OutputDebugString(L">-------");
+					UINT dwRef = pcContext->AddRef();
+					DEBUG_UINT(dwRef);*/
+
 					// backup all states
 					D3DX11_STATE_BLOCK sStateBlock;
 					CreateStateblock(pcContext, &sStateBlock);
+
+					/*dwRef = pcContext->Release();
+					DEBUG_UINT(dwRef);
+					OutputDebugString(L"-------<");*/
 
 					// clear all states, set targets
 					pcContext->ClearState();
@@ -1951,25 +1961,27 @@ void StereoSplitter::CSSetUnorderedAccessViews(ID3D11DeviceContext *pcThis, UINT
 		if (dwInternalIndex < D3D11_PS_CS_UAV_REGISTER_COUNT)
 		{
 			// set view internal
-			m_apcActiveUnorderedAccessViews[dwInternalIndex] = ppcUnorderedAccessViews[dwInternalIndex];
+			m_apcActiveUnorderedAccessViews[dwInternalIndex] = ppcUnorderedAccessViews[dwIndex];
 
-			if (ppcUnorderedAccessViews[dwInternalIndex])
+			if (m_apcActiveUnorderedAccessViews[dwInternalIndex])
 			{
 				D3D11_UNORDERED_ACCESS_VIEW_DESC sDesc;
-				ppcUnorderedAccessViews[dwInternalIndex]->GetDesc(&sDesc);
-				
+				m_apcActiveUnorderedAccessViews[dwInternalIndex]->GetDesc(&sDesc);
+
 				// is a buffer ?
 				if (sDesc.ViewDimension == D3D11_UAV_DIMENSION::D3D11_UAV_DIMENSION_BUFFER)
 				{
 					// get the resource
 					ID3D11Resource* pcBuffer = nullptr;
-					ppcUnorderedAccessViews[dwInternalIndex]->GetResource(&pcBuffer);
+					m_apcActiveUnorderedAccessViews[dwInternalIndex]->GetResource(&pcBuffer);
 					if (pcBuffer)
 					{
 						// get private rule index from buffer
-						INT nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
-						UINT dwDataSizeRulesIndex = sizeof(INT);
-						pcBuffer->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, &dwDataSizeRulesIndex, &nRulesIndex);
+						Vireio_Buffer_Rules_Index sRulesIndex;
+						sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+						sRulesIndex.m_dwUpdateCounter = 0;
+						UINT dwDataSizeRulesIndex = sizeof(Vireio_Buffer_Rules_Index);
+						pcBuffer->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, &dwDataSizeRulesIndex, &sRulesIndex);
 
 						//////////////////////////////////////
 						/*D3D11_BUFFER_DESC sDesc1;
@@ -1979,7 +1991,7 @@ void StereoSplitter::CSSetUnorderedAccessViews(ID3D11DeviceContext *pcThis, UINT
 						//////////////////////////////////////
 
 						// set stereo buffer view only if shader rule assigned
-						if ((dwDataSizeRulesIndex) && (nRulesIndex >= 0))
+						if ((dwDataSizeRulesIndex) && (sRulesIndex.m_nRulesIndex >= 0))
 						{
 							// set twin for right side, first get the private data interface
 							ID3D11Buffer* pcStereoBuffer = nullptr;
@@ -2022,15 +2034,16 @@ void StereoSplitter::CSSetUnorderedAccessViews(ID3D11DeviceContext *pcThis, UINT
 										pcUAV->Release();
 									}
 									else
-										m_apcActiveUnorderedAccessViews[dwInternalIndex + D3D11_PS_CS_UAV_REGISTER_COUNT] = ppcUnorderedAccessViews[dwInternalIndex];
+										m_apcActiveUnorderedAccessViews[dwInternalIndex + D3D11_PS_CS_UAV_REGISTER_COUNT] = m_apcActiveUnorderedAccessViews[dwInternalIndex];
 								}
 
 								pcStereoBuffer->Release();
 							}
-							m_apcActiveUnorderedAccessViews[dwInternalIndex + D3D11_PS_CS_UAV_REGISTER_COUNT] = ppcUnorderedAccessViews[dwInternalIndex];
+							else
+								m_apcActiveUnorderedAccessViews[dwInternalIndex + D3D11_PS_CS_UAV_REGISTER_COUNT] = m_apcActiveUnorderedAccessViews[dwInternalIndex];
 						}
 						else
-							m_apcActiveUnorderedAccessViews[dwInternalIndex + D3D11_PS_CS_UAV_REGISTER_COUNT] = ppcUnorderedAccessViews[dwInternalIndex];
+							m_apcActiveUnorderedAccessViews[dwInternalIndex + D3D11_PS_CS_UAV_REGISTER_COUNT] = m_apcActiveUnorderedAccessViews[dwInternalIndex];
 
 
 						pcBuffer->Release();
@@ -2038,10 +2051,12 @@ void StereoSplitter::CSSetUnorderedAccessViews(ID3D11DeviceContext *pcThis, UINT
 				}
 				else
 				{
-					DEBUG_UINT(sDesc.ViewDimension);
-					DEBUG_HEX(sDesc.Format);
+					//DEBUG_UINT(sDesc.ViewDimension);
+					//DEBUG_HEX(sDesc.Format);
 				}
 			}
+			else
+				m_apcActiveUnorderedAccessViews[dwInternalIndex + D3D11_PS_CS_UAV_REGISTER_COUNT] = m_apcActiveUnorderedAccessViews[dwInternalIndex];
 		}
 		else OutputDebugString(L"[STS] Game uses DirectX 11.1 : D3D11_1_UAV_SLOT_COUNT");
 	}
@@ -2743,7 +2758,7 @@ bool StereoSplitter::SetDrawingSide(ID3D11DeviceContext* pcContext, RenderPositi
 			pcContext->VSSetConstantBuffers(0, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT, &(*m_appcVSActiveConstantBuffers11)[D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT]);
 	}
 
-	// switch vertex shader constant buffers
+	// switch hull shader constant buffers
 	if (m_appcHSActiveConstantBuffers11)
 	if (*m_appcHSActiveConstantBuffers11)
 	{
@@ -2754,7 +2769,7 @@ bool StereoSplitter::SetDrawingSide(ID3D11DeviceContext* pcContext, RenderPositi
 			pcContext->HSSetConstantBuffers(0, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT, &(*m_appcHSActiveConstantBuffers11)[D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT]);
 	}
 
-	// switch vertex shader constant buffers
+	// switch domain shader constant buffers
 	if (m_appcDSActiveConstantBuffers11)
 	if (*m_appcDSActiveConstantBuffers11)
 	{
@@ -2765,7 +2780,7 @@ bool StereoSplitter::SetDrawingSide(ID3D11DeviceContext* pcContext, RenderPositi
 			pcContext->DSSetConstantBuffers(0, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT, &(*m_appcDSActiveConstantBuffers11)[D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT]);
 	}
 
-	// switch vertex shader constant buffers
+	// switch geometry shader constant buffers
 	if (m_appcGSActiveConstantBuffers11)
 	if (*m_appcGSActiveConstantBuffers11)
 	{
@@ -2776,7 +2791,7 @@ bool StereoSplitter::SetDrawingSide(ID3D11DeviceContext* pcContext, RenderPositi
 			pcContext->GSSetConstantBuffers(0, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT, &(*m_appcGSActiveConstantBuffers11)[D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT]);
 	}
 
-	// switch vertex shader constant buffers
+	// switch pixel shader constant buffers
 	if (m_appcPSActiveConstantBuffers11)
 	if (*m_appcPSActiveConstantBuffers11)
 	{

@@ -75,13 +75,46 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define TO_DO_ADD_BOOL_HERE_FALSE                                         false
 
 /**
+* Simple clipboard text helper.
+***/
+std::string GetClipboardText()
+{
+	// Try opening the clipboard
+	if (!OpenClipboard(nullptr))
+		return std::string();
+
+	// Get handle of clipboard object for ANSI text
+	HANDLE hData = GetClipboardData(CF_TEXT);
+	if (hData == nullptr)
+		return std::string();
+
+	// Lock the handle to get the actual text pointer
+	char * pszText = static_cast<char*>(GlobalLock(hData));
+	if (pszText == nullptr)
+		return std::string();
+
+	// Save text in a string class instance
+	std::string text(pszText);
+
+	// Release the lock
+	GlobalUnlock(hData);
+
+	// Release the clipboard
+	CloseClipboard();
+
+	return text;
+}
+
+/**
 * Constructor.
 ***/
 MatrixModifier::MatrixModifier() : AQU_Nodus(),
 m_aszShaderConstantsA(),
 m_aszShaderConstants(),
-m_aszShaderHashCodes(),
-m_adwShaderHashCodes(),
+m_aszVShaderHashCodes(),
+m_adwVShaderHashCodes(),
+m_aszPShaderHashCodes(),
+m_adwPShaderHashCodes(),
 m_eDebugOption(Debug_Grab_Options::Debug_ConstantFloat4),
 m_bGrabDebug(false),
 m_adwPageIDs(0, 0),
@@ -133,7 +166,7 @@ m_dwCurrentChosenShaderHashCode(0)
 	// clear GUI page structures
 	ZeroMemory(&m_sPageDebug, sizeof(PageDebug));
 	ZeroMemory(&m_sPageGameSettings, sizeof(PageGameSettings));
-	ZeroMemory(&m_sPageVertexShader, sizeof(PageVertexShader));
+	ZeroMemory(&m_sPageShader, sizeof(PageShader));
 	ZeroMemory(&m_sPageGameShaderRules, sizeof(PageGameShaderRules));
 
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
@@ -156,7 +189,9 @@ m_dwCurrentChosenShaderHashCode(0)
 	m_bConstantBuffersInitialized = false;
 
 	// init shader vector
-	m_asShaders = std::vector<Vireio_D3D11_Shader>();
+	m_asVShaders = std::vector<Vireio_D3D11_Shader>();
+	m_asPShaders = std::vector<Vireio_D3D11_Shader>();
+	m_eChosenShaderType = Vireio_Supported_Shaders::VertexShader;
 
 	// mapped resource data
 	m_asMappedBuffers = std::vector<Vireio_Map_Data>();
@@ -164,6 +199,9 @@ m_dwCurrentChosenShaderHashCode(0)
 
 	// reg count to 4 on shader page by default (=Matrix)
 	m_sPageGameShaderRules.m_dwRegCountValue = 4;
+
+	// constant rule buffer counter starts with 1 to init a first update
+	m_dwConstantRulesUpdateCounter = 1;
 
 	// nullptr for all dx10/11 input fields
 	m_ppvShaderBytecode_VertexShader = nullptr;
@@ -487,8 +525,10 @@ LPWSTR MatrixModifier::GetCommanderName(DWORD dwCommanderIndex)
 			return L"ppConstantBuffers_DX11_DS";
 		case dwVerifyConstantBuffers:
 			return L"Verify Constant Buffers";
-		case asShaderData:
-			return L"Shader Data Array";
+		case asVShaderData:
+			return L"Vertex Shader Data Array";
+		case asPShaderData:
+			return L"Pixel Shader Data Array";
 		default:
 			break;
 	}
@@ -685,7 +725,9 @@ DWORD MatrixModifier::GetCommanderType(DWORD dwCommanderIndex)
 			return NOD_Plugtype::AQU_PPNT_ID3D11BUFFER;
 		case dwVerifyConstantBuffers:
 			return NOD_Plugtype::AQU_UINT;
-		case asShaderData:
+		case asVShaderData:
+			return NOD_Plugtype::AQU_VOID;
+		case asPShaderData:
 			return NOD_Plugtype::AQU_VOID;
 		default:
 			break;
@@ -727,7 +769,7 @@ DWORD MatrixModifier::GetDecommanderType(DWORD dwDecommanderIndex)
 		case pPixelShader_10:
 			return NOD_Plugtype::AQU_PNT_ID3D10PIXELSHADER;
 		case pPixelShader_11:
-			return NOD_Plugtype::AQU_PNT_ID3D11VERTEXSHADER;
+			return NOD_Plugtype::AQU_PNT_ID3D11PIXELSHADER;
 		case pDesc_DX10:
 			return NOD_Plugtype::AQU_PNT_D3D10_BUFFER_DESC;
 		case pInitialData_DX10:
@@ -892,8 +934,10 @@ void* MatrixModifier::GetOutputPointer(DWORD dwCommanderIndex)
 			return (void*)&m_pvOutput[STS_Commanders::ppActiveConstantBuffers_DX11_PixelShader];
 		case dwVerifyConstantBuffers:
 			return (void*)&m_dwVerifyConstantBuffers;
-		case asShaderData:
-			return (void*)&m_asShaders;
+		case asVShaderData:
+			return (void*)&m_asVShaders;
+		case asPShaderData:
+			return (void*)&m_asPShaders;
 		default:
 			break;
 	}
@@ -1162,6 +1206,7 @@ bool MatrixModifier::SupportsD3DMethod(int nD3DVersion, int nD3DInterface, int n
 		if (nD3DInterface == INTERFACE_ID3D11DEVICECONTEXT)
 		{
 			if ((nD3DMethod == METHOD_ID3D11DEVICECONTEXT_VSSETSHADER) ||
+				(nD3DMethod == METHOD_ID3D11DEVICECONTEXT_PSSETSHADER) ||
 				(nD3DMethod == METHOD_ID3D11DEVICECONTEXT_VSSETCONSTANTBUFFERS) ||
 				(nD3DMethod == METHOD_ID3D11DEVICECONTEXT_MAP) ||
 				(nD3DMethod == METHOD_ID3D11DEVICECONTEXT_UNMAP) ||
@@ -1172,7 +1217,8 @@ bool MatrixModifier::SupportsD3DMethod(int nD3DVersion, int nD3DInterface, int n
 				(nD3DMethod == METHOD_ID3D11DEVICECONTEXT_PSGETCONSTANTBUFFERS) ||
 				(nD3DMethod == METHOD_ID3D11DEVICECONTEXT_HSSETCONSTANTBUFFERS) ||
 				(nD3DMethod == METHOD_ID3D11DEVICECONTEXT_DSSETCONSTANTBUFFERS) ||
-				(nD3DMethod == METHOD_ID3D11DEVICECONTEXT_GSSETCONSTANTBUFFERS))
+				(nD3DMethod == METHOD_ID3D11DEVICECONTEXT_GSSETCONSTANTBUFFERS) ||
+				(nD3DMethod == METHOD_ID3D11DEVICECONTEXT_PSSETCONSTANTBUFFERS))
 				return true;
 		}
 		else if (nD3DInterface == INTERFACE_IDXGISWAPCHAIN)
@@ -1220,12 +1266,14 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 						if ((sDesc.BindFlags & D3D11_BIND_CONSTANT_BUFFER) == D3D11_BIND_CONSTANT_BUFFER)
 						{
 							// get shader rules index
-							INT nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
-							UINT dwDataSizeRulesIndex = sizeof(INT);
-							((ID3D11Buffer*)*m_ppcDstResource_DX11)->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, &dwDataSizeRulesIndex, &nRulesIndex);
+							Vireio_Buffer_Rules_Index sRulesIndex;
+							sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+							sRulesIndex.m_dwUpdateCounter = 0;
+							UINT dwDataSizeRulesIndex = sizeof(Vireio_Buffer_Rules_Index);
+							((ID3D11Buffer*)*m_ppcDstResource_DX11)->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, &dwDataSizeRulesIndex, &sRulesIndex);
 
 							// do modification and update right buffer only if shader rule assigned !!
-							if ((dwDataSizeRulesIndex) && (nRulesIndex >= 0))
+							if ((dwDataSizeRulesIndex) && (sRulesIndex.m_nRulesIndex >= 0))
 							{
 								// get the private data interface
 								ID3D11Buffer* pcBuffer = nullptr;
@@ -1237,7 +1285,7 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 									// do the modification, first copy to buffers
 									memcpy(m_pchBuffer11Left, *m_ppvSrcData, sDesc.ByteWidth);
 									memcpy(m_pchBuffer11Right, *m_ppvSrcData, sDesc.ByteWidth);
-									DoBufferModification(nRulesIndex, (UINT_PTR)m_pchBuffer11Left, (UINT_PTR)m_pchBuffer11Right, sDesc.ByteWidth);
+									DoBufferModification(sRulesIndex.m_nRulesIndex, (UINT_PTR)m_pchBuffer11Left, (UINT_PTR)m_pchBuffer11Right, sDesc.ByteWidth);
 
 									// update left + right buffer
 									((ID3D11DeviceContext*)pThis)->UpdateSubresource(*m_ppcDstResource_DX11, *m_pdwDstSubresource, *m_ppsDstBox_DX11, m_pchBuffer11Left, *m_pdwSrcRowPitch, *m_pdwSrcDepthPitch);
@@ -1296,12 +1344,14 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 							if ((sDescDst.BindFlags & D3D11_BIND_CONSTANT_BUFFER) == D3D11_BIND_CONSTANT_BUFFER)
 							{
 								// set the same shader rules index (if present) for the destination as for the source
-								INT nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
-								UINT dwDataSizeRulesIndex = sizeof(INT);
-								((ID3D11Resource*)*m_ppcSrcResource_DX11_CopySub)->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, &dwDataSizeRulesIndex, &nRulesIndex);
-								if ((dwDataSizeRulesIndex) && (nRulesIndex >= 0))
+								Vireio_Buffer_Rules_Index sRulesIndex;
+								sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+								sRulesIndex.m_dwUpdateCounter = 0;
+								UINT dwDataSizeRulesIndex = sizeof(Vireio_Buffer_Rules_Index);
+								((ID3D11Resource*)*m_ppcSrcResource_DX11_CopySub)->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, &dwDataSizeRulesIndex, &sRulesIndex);
+								if ((dwDataSizeRulesIndex) && (sRulesIndex.m_nRulesIndex >= 0))
 								{
-									((ID3D11Resource*)*m_ppcDstResource_DX11_CopySub)->SetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, sizeof(INT), &nRulesIndex);
+									((ID3D11Resource*)*m_ppcDstResource_DX11_CopySub)->SetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, sizeof(Vireio_Buffer_Rules_Index), &sRulesIndex);
 								}
 
 								// copy to both sides, if source is a mono buffer set source to stereo buffer
@@ -1434,12 +1484,14 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 							if ((sDescDst.BindFlags & D3D11_BIND_CONSTANT_BUFFER) == D3D11_BIND_CONSTANT_BUFFER)
 							{
 								// set the same shader rules index (if present) for the destination as for the source
-								INT nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
-								UINT dwDataSizeRulesIndex = sizeof(INT);
-								((ID3D11Resource*)*m_ppcSrcResource_DX11_Copy)->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, &dwDataSizeRulesIndex, &nRulesIndex);
-								if ((dwDataSizeRulesIndex) && (nRulesIndex >= 0))
+								Vireio_Buffer_Rules_Index sRulesIndex;
+								sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+								sRulesIndex.m_dwUpdateCounter = 0;
+								UINT dwDataSizeRulesIndex = sizeof(Vireio_Buffer_Rules_Index);
+								((ID3D11Resource*)*m_ppcSrcResource_DX11_Copy)->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, &dwDataSizeRulesIndex, &sRulesIndex);
+								if ((dwDataSizeRulesIndex) && (sRulesIndex.m_nRulesIndex >= 0))
 								{
-									((ID3D11Resource*)*m_ppcDstResource_DX11_Copy)->SetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, sizeof(INT), &nRulesIndex);
+									((ID3D11Resource*)*m_ppcDstResource_DX11_Copy)->SetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, sizeof(Vireio_Buffer_Rules_Index), &sRulesIndex);
 								}
 
 								// copy to both sides, if source is a mono buffer set source to stereo buffer
@@ -1545,7 +1597,7 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 						}
 
 						// currently chosen ?
-						if (m_dwCurrentChosenShaderHashCode)
+						if ((m_dwCurrentChosenShaderHashCode) && (m_eChosenShaderType == Vireio_Supported_Shaders::VertexShader))
 						{
 							// get the current shader hash
 							Vireio_Shader_Private_Data sPrivateData;
@@ -1563,16 +1615,16 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 									std::wstringstream strStream;
 									strStream << L"Hash:" << sPrivateData.dwHash;
 									m_aszDebugTrace.push_back(strStream.str().c_str());
-									for (UINT dwI = 0; dwI < (UINT)m_asShaders[sPrivateData.dwIndex].asBuffers.size(); dwI++)
+									for (UINT dwI = 0; dwI < (UINT)m_asVShaders[sPrivateData.dwIndex].asBuffers.size(); dwI++)
 									{
 										strStream = std::wstringstream();
-										strStream << L"Name:" << m_asShaders[sPrivateData.dwIndex].asBuffers[dwI].szName << L"::Size:" << m_asShaders[sPrivateData.dwIndex].asBuffers[dwI].dwSize;
+										strStream << L"Name:" << m_asVShaders[sPrivateData.dwIndex].asBuffers[dwI].szName << L"::Size:" << m_asVShaders[sPrivateData.dwIndex].asBuffers[dwI].dwSize;
 										m_aszDebugTrace.push_back(strStream.str().c_str());
 									}
-									for (UINT dwI = 0; dwI < (UINT)m_asShaders[sPrivateData.dwIndex].asBuffersUnaccounted.size(); dwI++)
+									for (UINT dwI = 0; dwI < (UINT)m_asVShaders[sPrivateData.dwIndex].asBuffersUnaccounted.size(); dwI++)
 									{
 										strStream = std::wstringstream();
-										strStream << L"Reg:" << m_asShaders[sPrivateData.dwIndex].asBuffersUnaccounted[dwI].dwRegister << L"::Size:" << m_asShaders[sPrivateData.dwIndex].asBuffersUnaccounted[dwI].dwSize;
+										strStream << L"Reg:" << m_asVShaders[sPrivateData.dwIndex].asBuffersUnaccounted[dwI].dwRegister << L"::Size:" << m_asVShaders[sPrivateData.dwIndex].asBuffersUnaccounted[dwI].dwSize;
 										m_aszDebugTrace.push_back(strStream.str().c_str());
 									}
 
@@ -1582,14 +1634,16 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 									if (m_apcVSActiveConstantBuffers11[dwI])
 									{
 										// get shader rules index
-										INT nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
-										UINT dwDataSizeRulesIndex = sizeof(INT);
-										m_apcVSActiveConstantBuffers11[dwI]->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, &dwDataSizeRulesIndex, &nRulesIndex);
+										Vireio_Buffer_Rules_Index sRulesIndex;
+										sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+										sRulesIndex.m_dwUpdateCounter = 0;
+										UINT dwDataSizeRulesIndex = sizeof(Vireio_Buffer_Rules_Index);
+										m_apcVSActiveConstantBuffers11[dwI]->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, &dwDataSizeRulesIndex, &sRulesIndex);
 
 										D3D11_BUFFER_DESC sDesc;
 										m_apcVSActiveConstantBuffers11[dwI]->GetDesc(&sDesc);
 										strStream = std::wstringstream();
-										strStream << L"Buffer Size [" << dwI << L"]:" << sDesc.ByteWidth << L" RuleInd:" << nRulesIndex;
+										strStream << L"Buffer Size [" << dwI << L"]:" << sDesc.ByteWidth << L" RuleInd:" << sRulesIndex.m_nRulesIndex;
 										m_aszDebugTrace.push_back(strStream.str().c_str());
 									}
 								}
@@ -1612,26 +1666,89 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 								m_pcActiveVertexShader11->GetPrivateData(PDID_ID3D11VertexShader_Vireio_Data, &dwDataSize, (void*)&sPrivateData);
 
 							// get shader index
-							for (UINT dwI = 1; dwI < (UINT)m_adwShaderHashCodes.size(); dwI++)
+							for (UINT dwI = 1; dwI < (UINT)m_adwVShaderHashCodes.size(); dwI++)
 							{
-								if (sPrivateData.dwHash == m_adwShaderHashCodes[dwI])
+								if (sPrivateData.dwHash == m_adwVShaderHashCodes[dwI])
 								{
 									// move one forward
-									std::wstring szBuf = m_aszShaderHashCodes[dwI - 1];
-									m_aszShaderHashCodes[dwI - 1] = m_aszShaderHashCodes[dwI];
-									m_aszShaderHashCodes[dwI] = szBuf;
+									std::wstring szBuf = m_aszVShaderHashCodes[dwI - 1];
+									m_aszVShaderHashCodes[dwI - 1] = m_aszVShaderHashCodes[dwI];
+									m_aszVShaderHashCodes[dwI] = szBuf;
 
-									UINT dwBuf = m_adwShaderHashCodes[dwI - 1];
-									m_adwShaderHashCodes[dwI - 1] = m_adwShaderHashCodes[dwI];
-									m_adwShaderHashCodes[dwI] = dwBuf;
+									UINT dwBuf = m_adwVShaderHashCodes[dwI - 1];
+									m_adwVShaderHashCodes[dwI - 1] = m_adwVShaderHashCodes[dwI];
+									m_adwVShaderHashCodes[dwI] = dwBuf;
 
 									// end search;
-									dwI = (UINT)m_adwShaderHashCodes.size();
+									dwI = (UINT)m_adwVShaderHashCodes.size();
 								}
 							}
 						}
 					}
 					return nullptr;
+#pragma endregion
+#pragma region ID3D11DeviceContext::PSSetShader
+				case METHOD_ID3D11DEVICECONTEXT_PSSETSHADER:
+					if (!m_ppcPixelShader_11)
+					{
+						//m_pcActivePixelShader11 = nullptr;
+						return nullptr;
+					}
+					if (!*m_ppcPixelShader_11)
+					{
+						//m_pcActivePixelShader11 = nullptr;
+						return nullptr;
+					}
+					else
+					{
+						// currently chosen ?
+						if ((m_dwCurrentChosenShaderHashCode) && (m_eChosenShaderType == Vireio_Supported_Shaders::PixelShader))
+						{
+							// get the current shader hash
+							Vireio_Shader_Private_Data sPrivateData;
+							UINT dwDataSize = sizeof(sPrivateData);
+							(*m_ppcPixelShader_11)->GetPrivateData(PDID_ID3D11VertexShader_Vireio_Data, &dwDataSize, (void*)&sPrivateData);
+
+							// set null shader if hash matches
+							if (m_dwCurrentChosenShaderHashCode == sPrivateData.dwHash)
+							{
+								// call super method
+								((ID3D11DeviceContext*)pThis)->PSSetShader(nullptr, nullptr, NULL);
+
+								// method replaced, immediately return
+								nProvokerIndex |= AQU_PluginFlags::ImmediateReturnFlag;
+							}
+						}
+
+						// sort shader list ?
+						if (m_bSortShaderList)
+						{
+							// get the current shader hash
+							Vireio_Shader_Private_Data sPrivateData;
+							UINT dwDataSize = sizeof(sPrivateData);
+							(*m_ppcPixelShader_11)->GetPrivateData(PDID_ID3D11VertexShader_Vireio_Data, &dwDataSize, (void*)&sPrivateData);
+
+							// get shader index
+							for (UINT dwI = 1; dwI < (UINT)m_adwPShaderHashCodes.size(); dwI++)
+							{								
+								if (sPrivateData.dwHash == m_adwPShaderHashCodes[dwI])
+								{
+									// move one forward
+									std::wstring szBuf = m_aszPShaderHashCodes[dwI - 1];
+									m_aszPShaderHashCodes[dwI - 1] = m_aszPShaderHashCodes[dwI];
+									m_aszPShaderHashCodes[dwI] = szBuf;
+
+									UINT dwBuf = m_adwPShaderHashCodes[dwI - 1];
+									m_adwPShaderHashCodes[dwI - 1] = m_adwPShaderHashCodes[dwI];
+									m_adwPShaderHashCodes[dwI] = dwBuf;
+
+									// end search;
+									dwI = (UINT)m_adwPShaderHashCodes.size();
+								}
+							}
+						}
+					}
+					break;
 #pragma endregion
 #pragma region ID3D11DeviceContext::VSSetConstantBuffers
 				case METHOD_ID3D11DEVICECONTEXT_VSSETCONSTANTBUFFERS:
@@ -1833,9 +1950,13 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 #pragma endregion
 #pragma region ID3D11DeviceContext::PSGetConstantBuffers
 				case METHOD_ID3D11DEVICECONTEXT_PSGETCONSTANTBUFFERS:
-					// ID3D11DeviceContext::PSGetConstantBuffers(UINT StartSlot, UINT NumBuffers, ID3D11Buffer **ppConstantBuffers);
-					OutputDebugString(L"METHOD_ID3D11DEVICECONTEXT_PSGETCONSTANTBUFFERS");
-					// return a poiner to the active constant buffers
+					// currently, we set the main buffers to avoid that the game gets the 
+					// stereo buffers assioziated with the main buffers as private data interfaces.
+					// if there is a game that flickers (should not be) we need to replace the whole
+					// method (using AQU_PluginFlags::ImmediateReturnFlag)
+					((ID3D11DeviceContext*)pThis)->PSSetConstantBuffers(0,
+						D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT,
+						(ID3D11Buffer**)&m_apcPSActiveConstantBuffers11[0]);
 					break;
 #pragma endregion
 #pragma region ID3D11DeviceContext::Map
@@ -1875,12 +1996,14 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 								}
 
 								// get private data rule index from buffer
-								INT nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
-								UINT dwDataSizeRulesIndex = sizeof(INT);
-								((ID3D11Buffer*)*m_ppcResource_Map)->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, &dwDataSizeRulesIndex, &nRulesIndex);
+								Vireio_Buffer_Rules_Index sRulesIndex;
+								sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+								sRulesIndex.m_dwUpdateCounter = 0;
+								UINT dwDataSizeRulesIndex = sizeof(Vireio_Buffer_Rules_Index);
+								((ID3D11Buffer*)*m_ppcResource_Map)->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, &dwDataSizeRulesIndex, &sRulesIndex);
 
 								// no private data ? rules not addressed
-								if (!dwDataSizeRulesIndex) nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+								if (!dwDataSizeRulesIndex) sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
 
 								// do the map call..
 								*(HRESULT*)m_pvReturn = ((ID3D11DeviceContext*)pThis)->Map(*m_ppcResource_Map, *m_pdwSubresource_Map, *m_psMapType, *m_pdwMapFlags, *m_ppsMappedResource);
@@ -1899,7 +2022,7 @@ void* MatrixModifier::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3D
 									m_asMappedBuffers[dwIndex].m_dwMappedResourceDataSize = sDescDst.ByteWidth;
 									m_asMappedBuffers[dwIndex].m_eMapType = *m_psMapType;
 									m_asMappedBuffers[dwIndex].m_dwMapFlags = *m_pdwMapFlags;
-									m_asMappedBuffers[dwIndex].m_nMapRulesIndex = nRulesIndex;
+									m_asMappedBuffers[dwIndex].m_nMapRulesIndex = sRulesIndex.m_nRulesIndex;
 
 									// make buffer address homogenous
 									UINT_PTR dwAddress = (UINT_PTR)m_asMappedBuffers[dwIndex].m_pchBuffer11;
@@ -2013,14 +2136,35 @@ void MatrixModifier::WindowsEvent(UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	// multiply mouse coords by 4 due to Aquilinus workspace architecture
 	Vireio_GUI_Event sEvent = m_pcVireioGUI->WindowsEvent(msg, wParam, lParam, 4);
-
 	switch (sEvent.eType)
 	{
 		case NoEvent:
 			break;
 		case ChangedToNext:
-			break;
 		case ChangedToPrevious:
+			if (sEvent.dwIndexOfPage == m_adwPageIDs[GUI_Pages::ShadersPage])
+			{
+#if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
+				if (sEvent.dwIndexOfControl == m_sPageShader.m_dwShaderType)
+				{
+					// unselect all list boxes
+					m_pcVireioGUI->UnselectCurrentSelection(m_sPageShader.m_dwHashCodes);
+					m_pcVireioGUI->UnselectCurrentSelection(m_sPageShader.m_dwCurrentConstants);
+					m_pcVireioGUI->UnselectCurrentSelection(m_sPageShader.m_dwCurrentBuffersizes);
+
+					// set new value and the text list
+					m_eChosenShaderType = (Vireio_Supported_Shaders)sEvent.dwNewValue;
+					if (m_eChosenShaderType == Vireio_Supported_Shaders::VertexShader)
+					{
+						m_pcVireioGUI->SetNewTextList(m_sPageShader.m_dwHashCodes, &m_aszVShaderHashCodes);
+					}
+					else if (m_eChosenShaderType == Vireio_Supported_Shaders::PixelShader)
+					{
+						m_pcVireioGUI->SetNewTextList(m_sPageShader.m_dwHashCodes, &m_aszPShaderHashCodes);
+					}
+				}
+#endif
+			}
 			break;
 		case ChangedToValue:
 #pragma region ChangedToValue
@@ -2071,26 +2215,132 @@ void MatrixModifier::WindowsEvent(UINT msg, WPARAM wParam, LPARAM lParam)
 			else if (sEvent.dwIndexOfPage == m_adwPageIDs[GUI_Pages::ShadersPage])
 			{
 				// "Sort Shader List" button
-				if (sEvent.dwIndexOfControl == m_sPageVertexShader.m_dwSort)
+				if (sEvent.dwIndexOfControl == m_sPageShader.m_dwSort)
 				{
 					// set sorting bool
 					m_bSortShaderList = sEvent.bNewValue;
-
 				}
 			}
 			else if (sEvent.dwIndexOfPage == m_adwPageIDs[GUI_Pages::ShaderRulesPage])
 			{
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
 				if (sEvent.dwIndexOfControl == m_sPageGameShaderRules.m_dwConstantName)
+				{
 					m_sPageGameShaderRules.m_bConstantName = sEvent.bNewValue;
+
+					// if true -> get string from clipboard
+					if (sEvent.bNewValue)
+					{
+						std::string szClipboard = GetClipboardText();
+						m_sPageGameShaderRules.m_szConstantName = std::wstring(szClipboard.begin(), szClipboard.end());
+					}
+					// if false -> delete current value
+					else
+					{
+						m_sPageGameShaderRules.m_szConstantName = std::wstring();
+					}
+				}
 				else if (sEvent.dwIndexOfControl == m_sPageGameShaderRules.m_dwPartialName)
+				{
 					m_sPageGameShaderRules.m_bPartialName = sEvent.bNewValue;
+
+					// if true -> get string from clipboard
+					if (sEvent.bNewValue)
+					{
+						std::string szClipboard = GetClipboardText();
+						m_sPageGameShaderRules.m_szPartialName = std::wstring(szClipboard.begin(), szClipboard.end());
+					}
+					// if false -> delete current value
+					else
+					{
+						m_sPageGameShaderRules.m_szPartialName = std::wstring();
+					}
+				}
 				else if (sEvent.dwIndexOfControl == m_sPageGameShaderRules.m_dwBufferIndex)
+				{
 					m_sPageGameShaderRules.m_bBufferIndex = sEvent.bNewValue;
+
+					// if true -> try to parse a number from the clipboard
+					if (sEvent.bNewValue)
+					{
+						// get the clipboard text as a stream
+						std::wstringstream szClipboard;
+						szClipboard << GetClipboardText().c_str();
+
+						// parse to a number
+						UINT dwValue = 0;
+						szClipboard >> dwValue;
+
+						// delete the stream, parse the number back to the stream
+						szClipboard = std::wstringstream();
+						szClipboard << dwValue;
+
+						// and set the text
+						m_sPageGameShaderRules.m_szBufferIndex = szClipboard.str();
+					}
+					// if false -> delete current value
+					else
+					{
+						m_sPageGameShaderRules.m_szBufferIndex = std::wstring();
+					}
+				}
 				else if (sEvent.dwIndexOfControl == m_sPageGameShaderRules.m_dwBufferSize)
+				{
 					m_sPageGameShaderRules.m_bBufferSize = sEvent.bNewValue;
+
+					// if true -> try to parse a number from the clipboard
+					if (sEvent.bNewValue)
+					{
+						// get the clipboard text as a stream
+						std::wstringstream szClipboard;
+						szClipboard << GetClipboardText().c_str();
+
+						// parse to a number
+						UINT dwValue = 0;
+						szClipboard >> dwValue;
+
+						// delete the stream, parse the number back to the stream
+						szClipboard = std::wstringstream();
+						szClipboard << dwValue;
+
+						// and set the text
+						m_sPageGameShaderRules.m_szBufferSize = szClipboard.str();
+					}
+					// if false -> delete current value
+					else
+					{
+						m_sPageGameShaderRules.m_szBufferSize = std::wstring();
+					}
+				}
 				else if (sEvent.dwIndexOfControl == m_sPageGameShaderRules.m_dwStartRegIndex)
+				{
+					// set new value
 					m_sPageGameShaderRules.m_bStartRegIndex = sEvent.bNewValue;
+
+					// if true -> try to parse a number from the clipboard
+					if (sEvent.bNewValue)
+					{
+						// get the clipboard text as a stream
+						std::wstringstream szClipboard;
+						szClipboard << GetClipboardText().c_str();
+
+						// parse to a number
+						UINT dwValue = 0;
+						szClipboard >> dwValue;
+
+						// delete the stream, parse the number back to the stream
+						szClipboard = std::wstringstream();
+						szClipboard << dwValue;
+
+						// and set the text
+						m_sPageGameShaderRules.m_szStartRegIndex = szClipboard.str();
+					}
+					// if false -> delete current value
+					else
+					{
+						m_sPageGameShaderRules.m_szStartRegIndex = std::wstring();
+					}
+				}
 				else if (sEvent.dwIndexOfControl == m_sPageGameShaderRules.m_dwTranspose)
 					m_sPageGameShaderRules.m_bTranspose = sEvent.bNewValue;
 				else if (sEvent.dwIndexOfControl == m_sPageGameShaderRules.m_dwRegisterCount)
@@ -2134,23 +2384,42 @@ void MatrixModifier::WindowsEvent(UINT msg, WPARAM wParam, LPARAM lParam)
 			// "Shaders" page
 			else if (sEvent.dwIndexOfPage == m_adwPageIDs[GUI_Pages::ShadersPage])
 			{
+#if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
+				// which shader is chosen ?
+				std::vector<Vireio_D3D11_Shader>* pasShaders;
+				std::vector<std::wstring>* pasShaderHashCodes;
+				std::vector<UINT>* padwShaderHashCodes;
+				if (m_eChosenShaderType == Vireio_Supported_Shaders::VertexShader)
+				{
+					pasShaders = &m_asVShaders;
+					pasShaderHashCodes = &m_aszVShaderHashCodes;
+					padwShaderHashCodes = &m_adwVShaderHashCodes;
+				}
+				else if (m_eChosenShaderType == Vireio_Supported_Shaders::PixelShader)
+				{
+					pasShaders = &m_asPShaders;
+					pasShaderHashCodes = &m_aszPShaderHashCodes;
+					padwShaderHashCodes = &m_adwPShaderHashCodes;
+				}
+#endif
+
 				// "Update Shader Hash Code List" - Button
-				if (sEvent.dwIndexOfControl == m_sPageVertexShader.m_dwUpdate)
+				if (sEvent.dwIndexOfControl == m_sPageShader.m_dwUpdate)
 				{
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
-					// test the shader constant list for updates... TODO !! add button to do this
-					if (m_aszShaderHashCodes.size() < m_asShaders.size())
+					// test the shader constant list for updates...
+					if ((*pasShaderHashCodes).size() < (*pasShaders).size())
 					{
 						// loop through new shaders
-						for (UINT dwI = (UINT)m_aszShaderHashCodes.size(); dwI < (UINT)m_asShaders.size(); dwI++)
+						for (UINT dwI = (UINT)(*pasShaderHashCodes).size(); dwI < (UINT)(*pasShaders).size(); dwI++)
 						{
 							// loop through shader buffers
-							for (UINT dwJ = 0; dwJ < (UINT)m_asShaders[dwI].asBuffers.size(); dwJ++)
+							for (UINT dwJ = 0; dwJ < (UINT)(*pasShaders)[dwI].asBuffers.size(); dwJ++)
 							{
-								for (UINT dwK = 0; dwK < (UINT)m_asShaders[dwI].asBuffers[dwJ].asVariables.size(); dwK++)
+								for (UINT dwK = 0; dwK < (UINT)(*pasShaders)[dwI].asBuffers[dwJ].asVariables.size(); dwK++)
 								{
 									// convert to wstring
-									std::string szNameA = std::string(m_asShaders[dwI].asBuffers[dwJ].asVariables[dwK].szName);
+									std::string szNameA = std::string((*pasShaders)[dwI].asBuffers[dwJ].asVariables[dwK].szName);
 									std::wstring szName(szNameA.begin(), szNameA.end());
 
 									// constant available in list ?
@@ -2163,21 +2432,21 @@ void MatrixModifier::WindowsEvent(UINT msg, WPARAM wParam, LPARAM lParam)
 							}
 
 							// add shader hash to lists
-							std::wstring szHash = std::to_wstring(m_asShaders[dwI].dwHashCode);
-							m_aszShaderHashCodes.push_back(szHash);
-							m_adwShaderHashCodes.push_back(m_asShaders[dwI].dwHashCode);
+							std::wstring szHash = std::to_wstring((*pasShaders)[dwI].dwHashCode);
+							(*pasShaderHashCodes).push_back(szHash);
+							(*padwShaderHashCodes).push_back((*pasShaders)[dwI].dwHashCode);
 						}
 					}
 #endif
 				}
 				// "-> To Name" - Button
-				else if (sEvent.dwIndexOfControl == m_sPageVertexShader.m_dwToName)
+				else if (sEvent.dwIndexOfControl == m_sPageShader.m_dwToName)
 				{
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
 					INT nSelection = 0;
 
 					// get current selection of the shader constant list
-					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageVertexShader.m_dwCurrentConstants);
+					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageShader.m_dwCurrentConstants);
 
 					if ((nSelection >= 0) && (nSelection < (INT)m_aszShaderConstantsCurrent.size()))
 					{
@@ -2187,16 +2456,16 @@ void MatrixModifier::WindowsEvent(UINT msg, WPARAM wParam, LPARAM lParam)
 #endif
 				}
 				// "-> To Register" - Button
-				else if (sEvent.dwIndexOfControl == m_sPageVertexShader.m_dwToRegister)
+				else if (sEvent.dwIndexOfControl == m_sPageShader.m_dwToRegister)
 				{
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
 					INT nSelection = 0;
 
 					// get current selection of the shader constant list
-					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageVertexShader.m_dwHashCodes);
+					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageShader.m_dwHashCodes);
 
-					if ((nSelection >= 0) && (nSelection < (INT)m_adwShaderHashCodes.size()))
-						m_dwCurrentChosenShaderHashCode = m_adwShaderHashCodes[nSelection];
+					if ((nSelection >= 0) && (nSelection < (INT)(*padwShaderHashCodes).size()))
+						m_dwCurrentChosenShaderHashCode = (*padwShaderHashCodes)[nSelection];
 					else
 						m_dwCurrentChosenShaderHashCode = 0;
 
@@ -2204,49 +2473,49 @@ void MatrixModifier::WindowsEvent(UINT msg, WPARAM wParam, LPARAM lParam)
 					{
 						// find the hash code in the shader list
 						UINT dwIndex = 0;
-						for (UINT dwI = 0; dwI < (UINT)m_asShaders.size(); dwI++)
+						for (UINT dwI = 0; dwI < (UINT)(*pasShaders).size(); dwI++)
 						{
-							if (m_dwCurrentChosenShaderHashCode == m_asShaders[dwI].dwHashCode)
+							if (m_dwCurrentChosenShaderHashCode == (*pasShaders)[dwI].dwHashCode)
 							{
 								dwIndex = dwI;
-								dwI = (UINT)m_asShaders.size();
+								dwI = (UINT)(*pasShaders).size();
 							}
 						}
 
 						INT nSelection = 0;
 
 						// get current selection of the shader constant list
-						nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageVertexShader.m_dwCurrentConstants);
+						nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageShader.m_dwCurrentConstants);
 
 						if ((nSelection >= 0) && (nSelection < (INT)m_aszShaderConstantsCurrent.size()))
 						{
-							if (m_asShaders[dwIndex].asBuffers.size())
+							if ((*pasShaders)[dwIndex].asBuffers.size())
 							{
 								UINT dwBufferIndex = 0;
 
 								// get the buffer index
-								while (dwBufferIndex < (UINT)m_asShaders[dwIndex].asBuffers.size())
+								while (dwBufferIndex < (UINT)(*pasShaders)[dwIndex].asBuffers.size())
 								{
-									if (nSelection >= (INT)m_asShaders[dwIndex].asBuffers[dwBufferIndex].asVariables.size())
+									if (nSelection >= (INT)(*pasShaders)[dwIndex].asBuffers[dwBufferIndex].asVariables.size())
 									{
-										nSelection -= (INT)m_asShaders[dwIndex].asBuffers[dwBufferIndex].asVariables.size();
+										nSelection -= (INT)(*pasShaders)[dwIndex].asBuffers[dwBufferIndex].asVariables.size();
 										dwBufferIndex++;
 									}
 									else break;
 								}
 
 								// set data based on selection
-								if (nSelection < (INT)m_asShaders[dwIndex].asBuffers[dwBufferIndex].asVariables.size())
+								if (nSelection < (INT)(*pasShaders)[dwIndex].asBuffers[dwBufferIndex].asVariables.size())
 								{
-									// set new start register string on the shader rules page (=offset/4)
-									std::wstringstream szStartOffset; szStartOffset << (m_asShaders[dwIndex].asBuffers[dwBufferIndex].asVariables[nSelection].dwStartOffset >> 2);
+									// set new start register string on the shader rules page (=offset/16)
+									std::wstringstream szStartOffset; szStartOffset << ((*pasShaders)[dwIndex].asBuffers[dwBufferIndex].asVariables[nSelection].dwStartOffset >> 4);
 									m_sPageGameShaderRules.m_szStartRegIndex = szStartOffset.str();
 
 									// also set the buffer index if present
-									if (dwBufferIndex < (UINT)m_asShaders[dwIndex].asBuffersUnaccounted.size())
+									if (dwBufferIndex < (UINT)(*pasShaders)[dwIndex].asBuffersUnaccounted.size())
 									{
 										// set the new register
-										std::wstringstream szStartRegister; szStartRegister << m_asShaders[dwIndex].asBuffersUnaccounted[dwBufferIndex].dwRegister;
+										std::wstringstream szStartRegister; szStartRegister << (*pasShaders)[dwIndex].asBuffersUnaccounted[dwBufferIndex].dwRegister;
 										m_sPageGameShaderRules.m_szBufferIndex = szStartRegister.str();
 									}
 								}
@@ -2257,54 +2526,53 @@ void MatrixModifier::WindowsEvent(UINT msg, WPARAM wParam, LPARAM lParam)
 					}
 #endif
 				}
-				// "-> To Buffer Size" - Button
-				else if (sEvent.dwIndexOfControl == m_sPageVertexShader.m_dwToBufferSize)
-				{
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
+				// "-> To Buffer Size" - Button
+				else if (sEvent.dwIndexOfControl == m_sPageShader.m_dwToBufferSize)
+				{
 					INT nSelection = 0;
 
 					// get current selection of the shader constant list
-					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageVertexShader.m_dwCurrentBuffersizes);
+					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageShader.m_dwCurrentBuffersizes);
 
 					if ((nSelection >= 0) && (nSelection < (INT)m_aszShaderBuffersizes.size()))
 					{
 						// set the name to the name control of the shader rules page
 						m_sPageGameShaderRules.m_szBufferSize = m_aszShaderBuffersizes[nSelection];
 					}
-#endif
 				}
 				// "-> To Buffer Index" - Button
-				else if (sEvent.dwIndexOfControl == m_sPageVertexShader.m_dwToBufferIndex)
+				else if (sEvent.dwIndexOfControl == m_sPageShader.m_dwToBufferIndex)
 				{
-#if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
 					INT nSelection = 0;
 
 					// get current selection of the shader constant list
-					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageVertexShader.m_dwCurrentBuffersizes);
+					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageShader.m_dwCurrentBuffersizes);
 
 					if ((nSelection >= 0) && (nSelection < (INT)m_aszShaderBuffersizes.size()))
 					{
 						// set the name to the name control of the shader rules page
 						m_sPageGameShaderRules.m_szBufferIndex = m_aszShaderBuffersizes[nSelection];
 					}
-#endif
 				}
+#endif
 				// "Hash Codes" - List
-				else if (sEvent.dwIndexOfControl == m_sPageVertexShader.m_dwHashCodes)
+				else if (sEvent.dwIndexOfControl == m_sPageShader.m_dwHashCodes)
 				{
+#if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
 					INT nSelection = 0;
 
 					// get current selection of the shader constant list
-					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageVertexShader.m_dwHashCodes);
+					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageShader.m_dwHashCodes);
 
-					if ((nSelection >= 0) && (nSelection < (INT)m_adwShaderHashCodes.size()))
-						m_dwCurrentChosenShaderHashCode = m_adwShaderHashCodes[nSelection];
+					if ((nSelection >= 0) && (nSelection < (INT)(*padwShaderHashCodes).size()))
+						m_dwCurrentChosenShaderHashCode = (*padwShaderHashCodes)[nSelection];
 					else
 						m_dwCurrentChosenShaderHashCode = 0;
 
 					// fill current shader data lists, first unselect a possible selection
-					m_pcVireioGUI->UnselectCurrentSelection(m_sPageVertexShader.m_dwCurrentConstants);
-					m_pcVireioGUI->UnselectCurrentSelection(m_sPageVertexShader.m_dwCurrentBuffersizes);
+					m_pcVireioGUI->UnselectCurrentSelection(m_sPageShader.m_dwCurrentConstants);
+					m_pcVireioGUI->UnselectCurrentSelection(m_sPageShader.m_dwCurrentBuffersizes);
 					m_aszShaderConstantsCurrent = std::vector<std::wstring>();
 					m_aszShaderBuffersizes = std::vector<std::wstring>();
 
@@ -2314,30 +2582,29 @@ void MatrixModifier::WindowsEvent(UINT msg, WPARAM wParam, LPARAM lParam)
 					m_aszShaderRuleGeneralIndices = std::vector<std::wstring>();
 					m_aszShaderRuleShaderIndices = std::vector<std::wstring>();
 
-#if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
 					if (m_dwCurrentChosenShaderHashCode)
 					{
 						// find the hash code in the shader list
 						UINT dwIndex = 0;
-						for (UINT dwI = 0; dwI < (UINT)m_asShaders.size(); dwI++)
+						for (UINT dwI = 0; dwI < (UINT)(*pasShaders).size(); dwI++)
 						{
-							if (m_dwCurrentChosenShaderHashCode == m_asShaders[dwI].dwHashCode)
+							if (m_dwCurrentChosenShaderHashCode == (*pasShaders)[dwI].dwHashCode)
 							{
 								dwIndex = dwI;
-								dwI = (UINT)m_asShaders.size();
+								dwI = (UINT)(*pasShaders).size();
 							}
 						}
 
 						// add all constant names to the current shader constant list
-						for (UINT dwJ = 0; dwJ < (UINT)m_asShaders[dwIndex].asBuffers.size(); dwJ++)
+						for (UINT dwJ = 0; dwJ < (UINT)(*pasShaders)[dwIndex].asBuffers.size(); dwJ++)
 						{
-							std::wstringstream szSize; szSize << m_asShaders[dwIndex].asBuffers[dwJ].dwSize;
+							std::wstringstream szSize; szSize << (*pasShaders)[dwIndex].asBuffers[dwJ].dwSize;
 							m_aszShaderBuffersizes.push_back(szSize.str());
 
-							for (UINT dwK = 0; dwK < (UINT)m_asShaders[dwIndex].asBuffers[dwJ].asVariables.size(); dwK++)
+							for (UINT dwK = 0; dwK < (UINT)(*pasShaders)[dwIndex].asBuffers[dwJ].asVariables.size(); dwK++)
 							{
 								// convert to wstring
-								std::string szNameA = std::string(m_asShaders[dwIndex].asBuffers[dwJ].asVariables[dwK].szName);
+								std::string szNameA = std::string((*pasShaders)[dwIndex].asBuffers[dwJ].asVariables[dwK].szName);
 								std::wstring szName(szNameA.begin(), szNameA.end());
 
 								m_aszShaderConstantsCurrent.push_back(szName);
@@ -2347,47 +2614,47 @@ void MatrixModifier::WindowsEvent(UINT msg, WPARAM wParam, LPARAM lParam)
 						m_aszShaderBuffersizes.push_back(std::wstring(L">-----unaccounted:"));
 
 						// add all unaccounted buffer sizes to the buffer sizes list
-						for (UINT dwI = 0; dwI < (UINT)m_asShaders[dwIndex].asBuffersUnaccounted.size(); dwI++)
+						for (UINT dwI = 0; dwI < (UINT)(*pasShaders)[dwIndex].asBuffersUnaccounted.size(); dwI++)
 						{
-							std::wstringstream szReg; szReg << m_asShaders[dwIndex].asBuffersUnaccounted[dwI].dwRegister;
+							std::wstringstream szReg; szReg << (*pasShaders)[dwIndex].asBuffersUnaccounted[dwI].dwRegister;
 							m_aszShaderBuffersizes.push_back(szReg.str());
-							std::wstringstream szSize; szSize << m_asShaders[dwIndex].asBuffersUnaccounted[dwI].dwSize;
+							std::wstringstream szSize; szSize << (*pasShaders)[dwIndex].asBuffersUnaccounted[dwI].dwSize;
 							m_aszShaderBuffersizes.push_back(szSize.str());
 						}
 					}
 #endif
 				}
 				// "Shader Constants" - List
-				else if (sEvent.dwIndexOfControl == m_sPageVertexShader.m_dwCurrentConstants)
+				else if (sEvent.dwIndexOfControl == m_sPageShader.m_dwCurrentConstants)
 				{
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
 					INT nSelection = 0;
 
 					// get current selection of the shader constant list
-					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageVertexShader.m_dwCurrentConstants);
+					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageShader.m_dwCurrentConstants);
 
 					if ((nSelection >= 0) && (nSelection < (INT)m_aszShaderConstantsCurrent.size()))
 					{
 						// unselect and clear buffer size list
-						m_pcVireioGUI->UnselectCurrentSelection(m_sPageVertexShader.m_dwCurrentBuffersizes);
+						m_pcVireioGUI->UnselectCurrentSelection(m_sPageShader.m_dwCurrentBuffersizes);
 						m_aszShaderBuffersizes = std::vector<std::wstring>();
 
 						// get a number vector
 						std::vector<UINT> adwBufferSizes;
 
 						// loop through buffers, compare all entries
-						for (UINT dwI = 0; dwI < (UINT)m_asShaders.size(); dwI++)
+						for (UINT dwI = 0; dwI < (UINT)(*pasShaders).size(); dwI++)
 						{
-							for (UINT dwJ = 0; dwJ < (UINT)m_asShaders[dwI].asBuffers.size(); dwJ++)
+							for (UINT dwJ = 0; dwJ < (UINT)(*pasShaders)[dwI].asBuffers.size(); dwJ++)
 							{
-								if (nSelection < (INT)m_asShaders[dwI].asBuffers[dwJ].asVariables.size())
+								if (nSelection < (INT)(*pasShaders)[dwI].asBuffers[dwJ].asVariables.size())
 								{
 									// compare the two strings, first convert to wstring
-									std::string szNameA = std::string(m_asShaders[dwI].asBuffers[dwJ].asVariables[nSelection].szName);
+									std::string szNameA = std::string((*pasShaders)[dwI].asBuffers[dwJ].asVariables[nSelection].szName);
 									std::wstring szName(szNameA.begin(), szNameA.end());
 									if (szName.compare(m_aszShaderConstantsCurrent[nSelection]) == 0)
 									{
-										UINT dwSize = m_asShaders[dwI].asBuffers[dwJ].dwSize;
+										UINT dwSize = (*pasShaders)[dwI].asBuffers[dwJ].dwSize;
 										// add buffer size to list if not present
 										if (std::find(adwBufferSizes.begin(), adwBufferSizes.end(), dwSize) == adwBufferSizes.end())
 											adwBufferSizes.push_back(dwSize);
@@ -2484,6 +2751,40 @@ void MatrixModifier::WindowsEvent(UINT msg, WPARAM wParam, LPARAM lParam)
 					// update the control string list
 					FillShaderRuleIndices();
 				}
+				else if (sEvent.dwIndexOfControl == m_sPageGameShaderRules.m_dwAddGeneral)
+				{
+					// increase the update counter to reverify the constant buffers for rules
+					m_dwConstantRulesUpdateCounter++;
+
+					// get current selection of the shader constant list
+					INT nSelection = 0;
+					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageGameShaderRules.m_dwRuleIndices);
+					if ((nSelection >= 0) && (nSelection < (INT)m_aszShaderRuleIndices.size()))
+					{
+						// add to general rules
+						m_adwGlobalConstantRuleIndices.push_back((UINT)nSelection);
+					}
+
+					// update the list
+					FillShaderRuleGeneralIndices();
+				}
+				else if (sEvent.dwIndexOfControl == m_sPageGameShaderRules.m_dwDeleteGeneral)
+				{
+					// increase the update counter to reverify the constant buffers for rules
+					m_dwConstantRulesUpdateCounter++;
+
+					// get current selection of the shader constant list
+					INT nSelection = 0;
+					nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageGameShaderRules.m_dwGeneralIndices);
+					if ((nSelection >= 0) && (nSelection < (INT)m_aszShaderRuleGeneralIndices.size()))
+					{
+						// erase
+						m_adwGlobalConstantRuleIndices.erase(m_adwGlobalConstantRuleIndices.begin() + nSelection);
+					}
+
+					// update the list
+					FillShaderRuleGeneralIndices();
+				}
 #endif
 			}
 			break;
@@ -2515,9 +2816,11 @@ void MatrixModifier::XSSetConstantBuffers(ID3D11DeviceContext* pcContext, std::v
 			if (apcActiveConstantBuffers[dwInternalIndex])
 			{
 				// get private rule index from buffer
-				INT nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
-				UINT dwDataSizeRulesIndex = sizeof(INT);
-				apcActiveConstantBuffers[dwInternalIndex]->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, &dwDataSizeRulesIndex, &nRulesIndex);
+				Vireio_Buffer_Rules_Index sRulesIndex;
+				sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+				sRulesIndex.m_dwUpdateCounter = 0;
+				UINT dwDataSizeRulesIndex = sizeof(Vireio_Buffer_Rules_Index);
+				apcActiveConstantBuffers[dwInternalIndex]->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, &dwDataSizeRulesIndex, &sRulesIndex);
 
 				// set twin for right side, first get the private data interface
 				ID3D11Buffer* pcBuffer = nullptr;
@@ -2525,7 +2828,7 @@ void MatrixModifier::XSSetConstantBuffers(ID3D11DeviceContext* pcContext, std::v
 				apcActiveConstantBuffers[dwInternalIndex]->GetPrivateData(PDIID_ID3D11Buffer_Constant_Buffer_Right, &dwSize, (void*)&pcBuffer);
 
 				// stereo buffer and rules index present ?
-				if ((pcBuffer) && (dwDataSizeRulesIndex) && (nRulesIndex >= 0))
+				if ((pcBuffer) && (dwDataSizeRulesIndex) && (sRulesIndex.m_nRulesIndex >= 0))
 				{
 					// set right buffer as active buffer
 					apcActiveConstantBuffers[dwInternalIndex + D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT] = pcBuffer;
@@ -2536,22 +2839,27 @@ void MatrixModifier::XSSetConstantBuffers(ID3D11DeviceContext* pcContext, std::v
 					apcActiveConstantBuffers[dwInternalIndex + D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT] = apcActiveConstantBuffers[dwInternalIndex];
 
 					// verify buffer
-					if ((pcBuffer) && (nRulesIndex == VIREIO_CONSTANT_RULES_NOT_ADDRESSED))
+					if ((pcBuffer) && (sRulesIndex.m_nRulesIndex == VIREIO_CONSTANT_RULES_NOT_ADDRESSED))
 						VerifyConstantBuffer(apcActiveConstantBuffers[dwInternalIndex], dwInternalIndex);
 				}
 
 				// no stereo buffer present ?
 				if (!pcBuffer)
 				{
-					// create stereo constant buffer, first get device
-					ID3D11Device* pcDevice = nullptr;
-					apcActiveConstantBuffers[dwInternalIndex]->GetDevice(&pcDevice);
-					if (pcDevice)
+					D3D11_BUFFER_DESC sDesc;
+					apcActiveConstantBuffers[dwInternalIndex]->GetDesc(&sDesc);
+
+					// ignore immutable buffers
+					if (sDesc.Usage != D3D11_USAGE_IMMUTABLE)
 					{
-						D3D11_BUFFER_DESC sDesc;
-						apcActiveConstantBuffers[dwInternalIndex]->GetDesc(&sDesc);
-						CreateStereoConstantBuffer(pcDevice, pcContext, (ID3D11Buffer*)apcActiveConstantBuffers[dwInternalIndex], &sDesc, NULL, true);
-						pcDevice->Release();
+						// create stereo constant buffer, first get device
+						ID3D11Device* pcDevice = nullptr;
+						apcActiveConstantBuffers[dwInternalIndex]->GetDevice(&pcDevice);
+						if (pcDevice)
+						{
+							CreateStereoConstantBuffer(pcDevice, pcContext, (ID3D11Buffer*)apcActiveConstantBuffers[dwInternalIndex], &sDesc, NULL, true);
+							pcDevice->Release();
+						}
 					}
 				}
 				else
@@ -2570,15 +2878,22 @@ void MatrixModifier::XSSetConstantBuffers(ID3D11DeviceContext* pcContext, std::v
 void MatrixModifier::VerifyConstantBuffer(ID3D11Buffer *pcBuffer, UINT dwBufferIndex)
 {
 	// buffer already verified ?
-	INT nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
-	UINT dwDataSizeRulesIndex = sizeof(INT);
-	pcBuffer->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, &dwDataSizeRulesIndex, &nRulesIndex);
+	Vireio_Buffer_Rules_Index sRulesIndex;
+	sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+	sRulesIndex.m_dwUpdateCounter = 0;
+	UINT dwDataSizeRulesIndex = sizeof(Vireio_Buffer_Rules_Index);
+	pcBuffer->GetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, &dwDataSizeRulesIndex, &sRulesIndex);
 	if (dwDataSizeRulesIndex)
 	{
+		// if the update counter has increased set to "NOT ADDRESSED"
+		if (sRulesIndex.m_dwUpdateCounter < m_dwConstantRulesUpdateCounter)
+			sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_ADDRESSED;
+
 		// continue only if constant rules not addressed
-		if (nRulesIndex != VIREIO_CONSTANT_RULES_NOT_ADDRESSED)
+		if (sRulesIndex.m_nRulesIndex != VIREIO_CONSTANT_RULES_NOT_ADDRESSED)
 			return;
 	}
+
 	// get buffer size by description
 	D3D11_BUFFER_DESC sDesc;
 	pcBuffer->GetDesc(&sDesc);
@@ -2588,7 +2903,7 @@ void MatrixModifier::VerifyConstantBuffer(ID3D11Buffer *pcBuffer, UINT dwBufferI
 	UINT dwBufferRegisterSize = dwBufferSize >> 5;
 
 	// not addressed ? address
-	if (nRulesIndex == VIREIO_CONSTANT_RULES_NOT_ADDRESSED)
+	if (sRulesIndex.m_nRulesIndex == VIREIO_CONSTANT_RULES_NOT_ADDRESSED)
 	{
 		// create a vector for this constant buffer
 		std::vector<Vireio_Constant_Rule_Index> asConstantBufferRules = std::vector<Vireio_Constant_Rule_Index>();
@@ -2610,18 +2925,18 @@ void MatrixModifier::VerifyConstantBuffer(ID3D11Buffer *pcBuffer, UINT dwBufferI
 					if (m_asConstantRules[m_adwGlobalConstantRuleIndices[dwI]].m_bUseName)
 					{
 						// shader has this buffer index ?
-						if (dwBufferIndex < m_asShaders[sPrivateData.dwIndex].asBuffers.size())
+						if (dwBufferIndex < m_asVShaders[sPrivateData.dwIndex].asBuffers.size())
 						{
 							// loop through the shader constants
-							for (UINT nConstant = 0; nConstant < (UINT)m_asShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables.size(); nConstant++)
+							for (UINT nConstant = 0; nConstant < (UINT)m_asVShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables.size(); nConstant++)
 							{
 								// test full name matching
-								if (m_asConstantRules[m_adwGlobalConstantRuleIndices[dwI]].m_szConstantName.compare(m_asShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables[nConstant].szName) == 0)
+								if (m_asConstantRules[m_adwGlobalConstantRuleIndices[dwI]].m_szConstantName.compare(m_asVShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables[nConstant].szName) == 0)
 								{
 									// set this register to 'false' if not matching
-									UINT dwRegister = m_asShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset >> 5;
+									UINT dwRegister = m_asVShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset >> 5;
 									if (dwRegister <= dwBufferRegisterSize)
-										abRegistersMatching[m_asShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset >> 5] = true;
+										abRegistersMatching[m_asVShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset >> 5] = true;
 								}
 							}
 						}
@@ -2631,16 +2946,16 @@ void MatrixModifier::VerifyConstantBuffer(ID3D11Buffer *pcBuffer, UINT dwBufferI
 					if (m_asConstantRules[m_adwGlobalConstantRuleIndices[dwI]].m_bUsePartialNameMatch)
 					{
 						// shader has this buffer index ?
-						if (dwBufferIndex < m_asShaders[sPrivateData.dwIndex].asBuffers.size())
+						if (dwBufferIndex < m_asVShaders[sPrivateData.dwIndex].asBuffers.size())
 						{
 							// loop through the shader constants
-							for (UINT nConstant = 0; nConstant < (UINT)m_asShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables.size(); nConstant++)
+							for (UINT nConstant = 0; nConstant < (UINT)m_asVShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables.size(); nConstant++)
 							{
 								// test partial name matching
-								if (std::strstr(m_asShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables[nConstant].szName, m_asConstantRules[m_adwGlobalConstantRuleIndices[dwI]].m_szConstantName.c_str()))
+								if (std::strstr(m_asVShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables[nConstant].szName, m_asConstantRules[m_adwGlobalConstantRuleIndices[dwI]].m_szConstantName.c_str()))
 								{
 									// set this register to 'false' if not matching
-									UINT dwRegister = m_asShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset >> 5;
+									UINT dwRegister = m_asVShaders[sPrivateData.dwIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset >> 5;
 									if (dwRegister <= dwBufferRegisterSize)
 										abRegistersMatching[dwRegister] = true;
 								}
@@ -2714,7 +3029,7 @@ void MatrixModifier::VerifyConstantBuffer(ID3D11Buffer *pcBuffer, UINT dwBufferI
 				if ((dwCount) && (dwCount == (UINT)asConstantBufferRules.size()))
 				{
 					// set existing constant rule indices
-					nRulesIndex = (INT)dwI;
+					sRulesIndex.m_nRulesIndex = (INT)dwI;
 					bPresent = true;
 				}
 			}
@@ -2723,21 +3038,22 @@ void MatrixModifier::VerifyConstantBuffer(ID3D11Buffer *pcBuffer, UINT dwBufferI
 		// no rules found ? set to unavailable
 		if (!asConstantBufferRules.size())
 		{
-			nRulesIndex = VIREIO_CONSTANT_RULES_NOT_AVAILABLE;
+			sRulesIndex.m_nRulesIndex = VIREIO_CONSTANT_RULES_NOT_AVAILABLE;
 		}
 		// rules not present ?
 		else if (!bPresent)
 		{
 			// set index... current vector size
-			nRulesIndex = (INT)m_aasConstantBufferRuleIndices.size();
+			sRulesIndex.m_nRulesIndex = (INT)m_aasConstantBufferRuleIndices.size();
 
 			// and add
 			m_aasConstantBufferRuleIndices.push_back(asConstantBufferRules);
 		}
 	}
 
-	// set the rules index as private data to the constant buffer
-	pcBuffer->SetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Index, sizeof(INT), &nRulesIndex);
+	// set the rules index as private data to the constant buffer, first update the update counter
+	sRulesIndex.m_dwUpdateCounter = m_dwConstantRulesUpdateCounter;
+	pcBuffer->SetPrivateData(PDID_ID3D11Buffer_Vireio_Rules_Data, sizeof(Vireio_Buffer_Rules_Index), &sRulesIndex);
 }
 
 /**
@@ -2799,9 +3115,25 @@ void MatrixModifier::DoBufferModification(INT nRulesIndex, UINT_PTR pdwLeft, UIN
 void MatrixModifier::DebugOutput(const void *pvSrcData, UINT dwShaderIndex, UINT dwBufferIndex, UINT dwBufferSize)
 {
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
-	INT nSelection = 0;
+	// which shader is chosen ?
+	std::vector<Vireio_D3D11_Shader>* pasShaders;
+	std::vector<std::wstring>* pasShaderHashCodes;
+	std::vector<UINT>* padwShaderHashCodes;
+	if (m_eChosenShaderType == Vireio_Supported_Shaders::VertexShader)
+	{
+		pasShaders = &m_asVShaders;
+		pasShaderHashCodes = &m_aszVShaderHashCodes;
+		padwShaderHashCodes = &m_adwVShaderHashCodes;
+	}
+	else if (m_eChosenShaderType == Vireio_Supported_Shaders::PixelShader)
+	{
+		pasShaders = &m_asPShaders;
+		pasShaderHashCodes = &m_aszPShaderHashCodes;
+		padwShaderHashCodes = &m_adwPShaderHashCodes;
+	}
 
 	// get current selection of the shader constant list
+	INT nSelection = 0;
 	nSelection = m_pcVireioGUI->GetCurrentSelection(m_sPageDebug.m_dwShaderConstants);
 	if ((nSelection < 0) || (nSelection >= (INT)m_aszShaderConstantsA.size()))
 	{
@@ -2810,22 +3142,22 @@ void MatrixModifier::DebugOutput(const void *pvSrcData, UINT dwShaderIndex, UINT
 	}
 
 	// loop through the shader constants
-	for (size_t nConstant = 0; nConstant < m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables.size(); nConstant++)
+	for (size_t nConstant = 0; nConstant < (*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables.size(); nConstant++)
 	{
 		// add the debug data by type
 		switch (m_eDebugOption)
 		{
 			case Debug_ConstantFloat4:
 				// test the name of the constant
-				if (std::strstr(m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].szName, m_aszShaderConstantsA[nSelection].c_str()))
+				if (std::strstr((*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].szName, m_aszShaderConstantsA[nSelection].c_str()))
 				{
 					UINT dwSize = sizeof(float)* 4;
 
 					// is this  in range ?
-					if (dwBufferSize >= (m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset + dwSize))
+					if (dwBufferSize >= ((*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset + dwSize))
 					{
 						// get pointers to the data
-						UINT_PTR pv = (UINT_PTR)pvSrcData + m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset;
+						UINT_PTR pv = (UINT_PTR)pvSrcData + (*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset;
 						D3DXVECTOR4 sVector4 = D3DXVECTOR4((CONST FLOAT*)pv);
 
 						std::wstringstream strStream;
@@ -2839,17 +3171,17 @@ void MatrixModifier::DebugOutput(const void *pvSrcData, UINT dwShaderIndex, UINT
 				break;
 			case Debug_ConstantFloat8:
 				// test the name of the constant
-				if (std::strstr(m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].szName, m_aszShaderConstantsA[nSelection].c_str()))
+				if (std::strstr((*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].szName, m_aszShaderConstantsA[nSelection].c_str()))
 				{
 					UINT dwSize = sizeof(float)* 4 * 2;
 
 					// is this  in range ?
-					if (dwBufferSize >= (m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset + dwSize))
+					if (dwBufferSize >= ((*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset + dwSize))
 					{
 						// get pointers to the data
-						UINT_PTR pv = (UINT_PTR)pvSrcData + m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset;
+						UINT_PTR pv = (UINT_PTR)pvSrcData + (*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset;
 						D3DXVECTOR4 sVector4 = D3DXVECTOR4((CONST FLOAT*)pv);
-						pv = (UINT_PTR)pvSrcData + m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset + sizeof(D3DVECTOR);
+						pv = (UINT_PTR)pvSrcData + (*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset + sizeof(D3DVECTOR);
 						D3DXVECTOR4 sVector4_1 = D3DXVECTOR4((CONST FLOAT*)pv);
 
 						std::wstringstream strStream;
@@ -2865,15 +3197,15 @@ void MatrixModifier::DebugOutput(const void *pvSrcData, UINT dwShaderIndex, UINT
 				break;
 			case Debug_ConstantFloat16:
 				// test the name of the constant
-				if (std::strstr(m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].szName, m_aszShaderConstantsA[nSelection].c_str()))
+				if (std::strstr((*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].szName, m_aszShaderConstantsA[nSelection].c_str()))
 				{
 					UINT dwSize = sizeof(float)* 4 * 4;
 
 					// is this  in range ?
-					if (dwBufferSize >= (m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset + dwSize))
+					if (dwBufferSize >= ((*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset + dwSize))
 					{
 						// get pointers to the data
-						UINT_PTR pv = (UINT_PTR)pvSrcData + m_asShaders[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset;
+						UINT_PTR pv = (UINT_PTR)pvSrcData + (*pasShaders)[dwShaderIndex].asBuffers[dwBufferIndex].asVariables[nConstant].dwStartOffset;
 						D3DXMATRIX sMatrix = D3DXMATRIX((CONST FLOAT*)pv);
 
 						std::wstringstream strStream;
@@ -2950,6 +3282,11 @@ void MatrixModifier::CreateGUI()
 	static std::wstring szToRegister = std::wstring(L"-> Register");
 	static std::wstring szToBufferSize = std::wstring(L"-> Buffer Size");
 	static std::wstring szToBufferIndex = std::wstring(L"-> Buffer Index");
+	std::wstring szVertexShader = std::wstring(L"Vertex Shader");
+	std::wstring szPixelShader = std::wstring(L"Pixel Shader");
+	static std::vector<std::wstring> aszShaderTypes;
+	aszShaderTypes.push_back(szVertexShader);
+	aszShaderTypes.push_back(szPixelShader);
 
 	// shader rules page
 	static std::wstring szConstantName = std::wstring(L"Constant Name");
@@ -3045,6 +3382,7 @@ void MatrixModifier::CreateGUI()
 #pragma endregion
 
 #pragma region Vertex Shader Page
+#if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
 	// shader constant buffer size list (lists always first from bottom to top!)
 	ZeroMemory(&sControl, sizeof(Vireio_Control));
 	sControl.m_eControlType = Vireio_Control_Type::ListBox;
@@ -3054,8 +3392,8 @@ void MatrixModifier::CreateGUI()
 	sControl.m_sSize.cy = ((GUI_HEIGHT - GUI_CONTROL_FONTSIZE * 4) >> 3) - GUI_CONTROL_LINE;
 	sControl.m_sListBox.m_paszEntries = &m_aszShaderBuffersizes;
 	sControl.m_sListBox.m_bSelectable = true;
-	m_sPageVertexShader.m_dwCurrentBuffersizes = m_pcVireioGUI->AddControl(m_adwPageIDs[GUI_Pages::ShadersPage], sControl);
-
+	m_sPageShader.m_dwCurrentBuffersizes = m_pcVireioGUI->AddControl(m_adwPageIDs[GUI_Pages::ShadersPage], sControl);
+#endif
 	// shader constant list
 	ZeroMemory(&sControl, sizeof(Vireio_Control));
 	sControl.m_eControlType = Vireio_Control_Type::ListBox;
@@ -3065,7 +3403,7 @@ void MatrixModifier::CreateGUI()
 	sControl.m_sSize.cy = ((GUI_HEIGHT - GUI_CONTROL_FONTSIZE * 4) >> 2) - GUI_CONTROL_LINE;
 	sControl.m_sListBox.m_paszEntries = &m_aszShaderConstantsCurrent;
 	sControl.m_sListBox.m_bSelectable = true;
-	m_sPageVertexShader.m_dwCurrentConstants = m_pcVireioGUI->AddControl(m_adwPageIDs[GUI_Pages::ShadersPage], sControl);
+	m_sPageShader.m_dwCurrentConstants = m_pcVireioGUI->AddControl(m_adwPageIDs[GUI_Pages::ShadersPage], sControl);
 
 	// create the shader list
 	ZeroMemory(&sControl, sizeof(Vireio_Control));
@@ -3076,8 +3414,8 @@ void MatrixModifier::CreateGUI()
 	sControl.m_sSize.cy = (GUI_HEIGHT >> 1) - GUI_CONTROL_BORDER - GUI_CONTROL_LINE;
 	sControl.m_sListBox.m_bSelectable = true;
 	sControl.m_sListBox.m_nCurrentSelection = -1;                                                   /**< Set to -1 means 'No Selection' at startup ***/
-	sControl.m_sListBox.m_paszEntries = &m_aszShaderHashCodes;                                      /**< All list entries stored in m_aszShaderHashCodes ***/
-	m_sPageVertexShader.m_dwHashCodes = m_pcVireioGUI->AddControl(m_adwPageIDs[GUI_Pages::ShadersPage], sControl);
+	sControl.m_sListBox.m_paszEntries = &m_aszVShaderHashCodes;                                     /**< At start we set the vertex shader hash code list here. ***/
+	m_sPageShader.m_dwHashCodes = m_pcVireioGUI->AddControl(m_adwPageIDs[GUI_Pages::ShadersPage], sControl);
 
 	// "update shader data" button
 	ZeroMemory(&sControl, sizeof(Vireio_Control));
@@ -3088,13 +3426,17 @@ void MatrixModifier::CreateGUI()
 	sControl.m_sSize.cy = GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER;
 	static std::wstring szButtonUpdateShaderDataText = std::wstring(L"Update Data");
 	sControl.m_sButton.m_pszText = &szButtonUpdateShaderDataText;
-	m_sPageVertexShader.m_dwUpdate = m_pcVireioGUI->AddControl(m_adwPageIDs[GUI_Pages::ShadersPage], sControl);
-	m_sPageVertexShader.m_dwSort = CreateSwitchControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &szSort, m_bSortShaderList, GUI_CONTROL_FONTBORDER + GUI_CONTROL_BUTTONSIZE, (GUI_HEIGHT >> 1) - GUI_CONTROL_LINE, GUI_CONTROL_BUTTONSIZE, GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER);
+	m_sPageShader.m_dwUpdate = m_pcVireioGUI->AddControl(m_adwPageIDs[GUI_Pages::ShadersPage], sControl);
+	m_sPageShader.m_dwSort = CreateSwitchControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &szSort, m_bSortShaderList, GUI_CONTROL_FONTBORDER + GUI_CONTROL_BUTTONSIZE, (GUI_HEIGHT >> 1) - GUI_CONTROL_LINE, GUI_CONTROL_BUTTONSIZE, GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER);
 
-	m_sPageVertexShader.m_dwToName = CreateButtonControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &szToName, GUI_CONTROL_FONTBORDER, (GUI_HEIGHT >> 2) + (GUI_HEIGHT >> 1) - GUI_CONTROL_BORDER - GUI_CONTROL_FONTBORDER, GUI_CONTROL_BUTTONSIZE, GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER);
-	m_sPageVertexShader.m_dwToRegister = CreateButtonControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &szToRegister, GUI_CONTROL_FONTBORDER + GUI_CONTROL_BUTTONSIZE, (GUI_HEIGHT >> 2) + (GUI_HEIGHT >> 1) - GUI_CONTROL_BORDER - GUI_CONTROL_FONTBORDER, GUI_CONTROL_BUTTONSIZE, GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER);
-	m_sPageVertexShader.m_dwToBufferSize = CreateButtonControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &szToBufferSize, GUI_CONTROL_FONTBORDER, GUI_HEIGHT - GUI_CONTROL_FONTSIZE * 6, GUI_CONTROL_BUTTONSIZE, GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER);
-	m_sPageVertexShader.m_dwToBufferIndex = CreateButtonControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &szToBufferIndex, GUI_CONTROL_FONTBORDER + GUI_CONTROL_BUTTONSIZE, GUI_HEIGHT - GUI_CONTROL_FONTSIZE * 6, GUI_CONTROL_BUTTONSIZE, GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER);
+	m_sPageShader.m_dwToName = CreateButtonControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &szToName, GUI_CONTROL_FONTBORDER, (GUI_HEIGHT >> 2) + (GUI_HEIGHT >> 1) - GUI_CONTROL_BORDER - GUI_CONTROL_FONTBORDER, GUI_CONTROL_BUTTONSIZE, GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER);
+	m_sPageShader.m_dwToRegister = CreateButtonControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &szToRegister, GUI_CONTROL_FONTBORDER + GUI_CONTROL_BUTTONSIZE, (GUI_HEIGHT >> 2) + (GUI_HEIGHT >> 1) - GUI_CONTROL_BORDER - GUI_CONTROL_FONTBORDER, GUI_CONTROL_BUTTONSIZE, GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER);
+#if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
+	m_sPageShader.m_dwToBufferSize = CreateButtonControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &szToBufferSize, GUI_CONTROL_FONTBORDER, GUI_HEIGHT - GUI_CONTROL_FONTSIZE * 9, GUI_CONTROL_BUTTONSIZE, GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER);
+	m_sPageShader.m_dwToBufferIndex = CreateButtonControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &szToBufferIndex, GUI_CONTROL_FONTBORDER + GUI_CONTROL_BUTTONSIZE, GUI_HEIGHT - GUI_CONTROL_FONTSIZE * 9, GUI_CONTROL_BUTTONSIZE, GUI_CONTROL_FONTSIZE + GUI_CONTROL_FONTBORDER);
+
+	m_sPageShader.m_dwShaderType = CreateSpinControl(m_pcVireioGUI, m_adwPageIDs[GUI_Pages::ShadersPage], &aszShaderTypes, 0, GUI_CONTROL_FONTBORDER, GUI_HEIGHT - GUI_CONTROL_FONTSIZE * 7, GUI_CONTROL_BUTTONSIZE);
+#endif
 #pragma endregion
 
 #pragma region Shader Rule Page
@@ -3384,6 +3726,16 @@ void MatrixModifier::FillShaderRuleData(UINT dwRuleIndex)
 ***/
 void MatrixModifier::FillShaderRuleGeneralIndices()
 {
+	// first, unselect and clear
+	if (m_pcVireioGUI)
+		m_pcVireioGUI->UnselectCurrentSelection(m_sPageGameShaderRules.m_dwGeneralIndices);
+	m_aszShaderRuleGeneralIndices = std::vector<std::wstring>();
+	for (UINT dwI = 0; dwI < (UINT)m_adwGlobalConstantRuleIndices.size(); dwI++)
+	{
+		// add text
+		std::wstringstream szIndex; szIndex << L"Rule : " << m_adwGlobalConstantRuleIndices[dwI];
+		m_aszShaderRuleGeneralIndices.push_back(szIndex.str());
+	}
 }
 
 /**
