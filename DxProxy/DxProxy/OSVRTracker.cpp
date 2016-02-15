@@ -68,25 +68,25 @@ void OSVRTracker::resetPosition()
 
 void OSVRTracker::TrackerCallback(void* userdata, const OSVR_TimeValue* timestamp, const OSVR_PoseReport* report)
 {
-	float x = osvrVec3GetX(&report->pose.translation);
-	float y = osvrVec3GetY(&report->pose.translation);
-	float z = osvrVec3GetZ(&report->pose.translation);
+	double x = osvrVec3GetX(&report->pose.translation);
+	double y = osvrVec3GetY(&report->pose.translation);
+	double z = osvrVec3GetZ(&report->pose.translation);
 
-	float qw = osvrQuatGetW(&report->pose.rotation);
-	float qx = osvrQuatGetX(&report->pose.rotation);
-	float qy = osvrQuatGetY(&report->pose.rotation);
-	float qz = osvrQuatGetZ(&report->pose.rotation);
+	double qw = osvrQuatGetW(&report->pose.rotation);
+	double qx = osvrQuatGetX(&report->pose.rotation);
+	double qy = osvrQuatGetY(&report->pose.rotation);
+	double qz = osvrQuatGetZ(&report->pose.rotation);
 
-	float yaw = asin(-2.0 * (qx*qz - qw*qy)) * (180.0 / PI);
-	float pitch = atan2(2.0 * (qy*qz + qw*qx), qw*qw - qx*qx - qy*qy + qz*qz) * (180.0 / PI);
-	float roll = atan2(2.0 * (qx*qy + qw*qz), qw*qw + qx*qx - qy*qy - qz*qz) * (180.0 / PI);
+	float yaw = RADIANS_TO_DEGREES(asin(-2.0 * (qx*qz - qw*qy)));
+	float pitch = RADIANS_TO_DEGREES(atan2(2.0 * (qy*qz + qw*qx), qw*qw - qx*qx - qy*qy + qz*qz));
+	float roll = RADIANS_TO_DEGREES(atan2(2.0 * (qx*qy + qw*qz), qw*qw + qx*qx - qy*qy - qz*qz));
 
 	{
 		OSVRTracker* thiz = static_cast<OSVRTracker*>(userdata);
 		std::lock_guard<std::mutex> lock(thiz->m_mtx);
-		thiz->osvr_x = x;
-		thiz->osvr_y = y;
-		thiz->osvr_z = z;
+		thiz->osvr_x = (float)x;
+		thiz->osvr_y = (float)y;
+		thiz->osvr_z = (float)z;
 		thiz->osvr_yaw = yaw;
 		thiz->osvr_pitch = pitch;
 		thiz->osvr_roll = roll;
