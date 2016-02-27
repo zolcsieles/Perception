@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -19,34 +19,34 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{5DC25A42-2D36-4D00-B65A-831B92579301}</ProjectGuid>
-    <RootNamespace>VireioMatrixModifierDx10</RootNamespace>
-    <ProjectName>VireioMatrixModifierDx10</ProjectName>
+    <ProjectGuid>{42FF1DFB-B8B3-4A03-B00A-C811D04344F8}</ProjectGuid>
+    <RootNamespace>OSVR-Tracker</RootNamespace>
+    <ProjectName>OSVR-Tracker</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v110</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v110</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v110</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v110</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -67,7 +67,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <OutDir>$(USERPROFILE)\Documents\my games\Aquilinus\My Nodes Win32\</OutDir>
+    <OutDir>$(USERPROFILE)\Documents\my games\Aquilinus\My Nodes\</OutDir>
     <IncludePath>$(WindowsSDK_IncludePath);$(DXSDK_DIR)Include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
     <LibraryPath>$(DXSDK_DIR)Lib\x86;$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSDK_LibraryPath_x86);</LibraryPath>
   </PropertyGroup>
@@ -77,7 +77,7 @@
     <OutDir>$(USERPROFILE)\Documents\my games\Aquilinus\My Nodes x64\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <OutDir>$(USERPROFILE)\Documents\my games\Aquilinus\My Nodes Win32\</OutDir>
+    <OutDir>$(USERPROFILE)\Documents\my games\Aquilinus\My Nodes\</OutDir>
     <IncludePath>$(WindowsSDK_IncludePath);$(DXSDK_DIR)Include;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
     <LibraryPath>$(DXSDK_DIR)Lib\x86;$(VCInstallDir)lib;$(VCInstallDir)atlmfc\lib;$(WindowsSDK_LibraryPath_x86);</LibraryPath>
   </PropertyGroup>
@@ -90,37 +90,25 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>
-      </AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>VIREIO_MATRIX_MODIFIER;VIREIO_D3D10;VIREIO_D3D11;_WINDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(OSVR_CORE_DIR)\bin</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>
-      </AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(OSVR_CORE_DIR)\bin</AdditionalLibraryDirectories>
       <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>copy /Y "$(USERPROFILE)\Documents\my games\Aquilinus\My Nodes Win32\$(TargetName)$(TargetExt)" "$(USERPROFILE)\Documents\Vireio\Perception\bin\My Nodes Win32\$(TargetName)$(TargetExt)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>
-      </AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>VIREIO_MATRIX_MODIFIER;VIREIO_D3D10;VIREIO_D3D11;_WINDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(OSVR_CORE_DIR)\bin</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>
-      </AdditionalLibraryDirectories>
+      <AdditionalIncludeDirectories>$(OSVR_CORE_DIR)\bin</AdditionalIncludeDirectories>
       <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>copy /Y "$(USERPROFILE)\Documents\my games\Aquilinus\My Nodes x64\$(TargetName)$(TargetExt)" "$(USERPROFILE)\Documents\Vireio\Perception\bin\My Nodes x64\$(TargetName)$(TargetExt)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -128,21 +116,15 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>
-      </AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>VIREIO_MATRIX_MODIFIER;VIREIO_D3D10;VIREIO_D3D11;_WINDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(OSVR_CORE_DIR)\bin</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalLibraryDirectories>
-      </AdditionalLibraryDirectories>
+      <AdditionalIncludeDirectories>$(OSVR_CORE_DIR)\bin</AdditionalIncludeDirectories>
       <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>copy /Y "$(USERPROFILE)\Documents\my games\Aquilinus\My Nodes Win32\$(TargetName)$(TargetExt)" "$(USERPROFILE)\Documents\Vireio\Perception\bin\My Nodes Win32\$(TargetName)$(TargetExt)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -150,43 +132,28 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>
-      </AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>VIREIO_MATRIX_MODIFIER;VIREIO_D3D10;VIREIO_D3D11;_WINDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(OSVR_CORE_DIR)\bin</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalLibraryDirectories>
-      </AdditionalLibraryDirectories>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalIncludeDirectories>$(OSVR_CORE_DIR)\bin</AdditionalIncludeDirectories>
     </Link>
-    <PostBuildEvent>
-      <Command>copy /Y "$(USERPROFILE)\Documents\my games\Aquilinus\My Nodes x64\$(TargetName)$(TargetExt)" "$(USERPROFILE)\Documents\Vireio\Perception\bin\My Nodes x64\$(TargetName)$(TargetExt)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\..\..\..\DxProxy\DxProxy\ViewAdjustment.h" />
-    <ClInclude Include="..\..\..\..\..\Shared\ConfigDefaults.h" />
-    <ClInclude Include="..\..\..\..\Include\Vireio_GameConfig.h" />
-    <ClInclude Include="..\..\..\..\Include\Vireio_GUI.h" />
-    <ClInclude Include="..\..\..\..\Include\Vireio_GUIDs.h" />
-    <ClInclude Include="..\..\VireioMatrixModifier\AQU_Nodus.h" />
-    <ClInclude Include="..\..\VireioMatrixModifier\VireioMatrixModifier.h" />
-    <ClInclude Include="..\..\VireioMatrixModifier\Resources.h" />
-    <ClInclude Include="..\..\VireioMatrixModifier\VireioMatrixModifierDataStructures.h" />
+    <ClInclude Include="..\AQU_Nodus.h" />
+    <ClInclude Include="..\OSVR-Tracker.h" />
+    <ClInclude Include="..\Resources.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\..\..\DxProxy\DxProxy\ViewAdjustment.cpp" />
-    <ClCompile Include="..\..\..\..\Include\Vireio_GUI.cpp" />
-    <ClCompile Include="..\..\VireioMatrixModifier\VireioMatrixModifier.cpp" />
+    <ClCompile Include="..\OSVR-Tracker.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\VireioMatrixModifier\AQU_Nodus.def" />
+    <None Include="..\AQU_Nodus.def" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="..\..\VireioMatrixModifier\VireioMatrixModifier_Resources.rc" />
+    <ResourceCompile Include="..\OSVR-Tracker_Resources.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
