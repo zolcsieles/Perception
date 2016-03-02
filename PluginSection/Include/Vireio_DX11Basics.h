@@ -93,10 +93,84 @@ static const char* PS2D =
 
 	"float4 PS( VS_OUT vtx ) : SV_Target\n"
 	"{\n"
-	//"    return fontTexture.Sample( fontSampler, vtx.TexCoord );\n"
 	"    return float4(fontTexture.Sample( fontSampler, vtx.TexCoord ).xyz, 1.0);\n"
-	//"    return float4(1.0, 0.4, 0.3, 1.0);\n"
 	"}\n";
+
+/**
+* Simple Warp Shader.
+* Warp method taken from old DIY-Rift shader code.
+***/
+static const char* PS_WARP_SIMPLE =
+	"Texture2D fontTexture : register(t0);\n"
+    "SamplerState fontSampler : register(s0);\n"
+
+    "struct VS_OUT\n"
+    "{\n"
+    "   float4 Position  : SV_POSITION;\n"
+    "   float2 TexCoord : TEXCOORD0;\n"
+    "};\n"
+
+	"float2 Warp(float2 Tex : TEXCOORD0)\n"
+	"{\n"
+	"float2 newPos = Tex;\n"
+	"	float c = -60.0f / 10.0f;            // Distortion coefficient of some sort\n"
+	"	float u = Tex.x*2.0f - 1.0f;         // Texture coordinates converted to -1.0 to 1.0 range\n"
+	"	float v = Tex.y*2.0f - 1.0f;\n"
+	"	newPos.x = c*u / (pow(v, 2) + c);    // Distortion\n"
+	"	newPos.y = c*v / (pow(u, 2) + c);\n"
+	"	newPos.x = (newPos.x + 1.0f)*0.5f;	 // Convert range back to 0.0 to 1.0 (roughly, more like -1/14 to +15/14) which is why you get the clamped\n"
+	"	newPos.y = (newPos.y + 1.0f)*0.5f;	 // textures repeating to the edge where you're out of the texture coord range of 0.0 to 1.0\n"
+	"	return newPos;\n"
+	"}\n"
+
+    "float4 PS( VS_OUT vtx ) : SV_Target\n"
+    "{\n"
+    "   return float4(fontTexture.Sample( fontSampler, Warp(vtx.TexCoord) ).xyz, 1.0);\n"
+    "}\n";
+
+/**
+* Simple Distortion Shader.
+* Improved distortion method taken from OSVR core repository.
+***/
+static const char* PS_DIST_SIMPLE =
+    "Texture2D fontTexture : register(t0);\n"
+    "SamplerState fontSampler : register(s0);\n"
+
+    "struct VS_OUT\n"
+	"{\n"
+	"   float4 Position  : SV_POSITION;\n"
+	"   float2 TexCoord : TEXCOORD0;\n"
+	"};\n"
+
+	"float2 Distort(float2 p : TEXCOORD0)\n"
+	"{\n"
+	"	p.x = p.x * 2.0f - 1.0f;             // Texture coordinates converted to -1.0 to 1.0 range\n"
+	"	p.y = p.y * 2.0f - 1.0f;\n"
+	"   float r2 = p.x * p.x + p.y * p.y;    // Distortion \n"
+	"	float newRadius = (1 + 0.3f * r2);   // -> K1 \n"
+	"	p.x = p.x * newRadius * 0.8;         // Aspect ratio fix. \n"
+	"	p.y = p.y * newRadius * 1.2f;        // Aspect ratio fix. \n"
+	"	p.x = (p.x + 1.0f) * 0.5f;	         // Convert range back to 0.0 to 1.0\n"
+	"	p.y = (p.y + 1.0f) * 0.5f; "
+	"	return p;\n"
+	"}\n"
+
+	"float4 PS( VS_OUT vtx ) : SV_Target\n"
+	"{\n"
+	"   float2 fDist = Distort(vtx.TexCoord);\n"
+	"   if ((fDist.x < 0.0f) || (fDist.x > 1.0f) || (fDist.y < 0.0f) || (fDist.y > 1.0f)) return float4(0.0f, 0.0f, 0.0f, 0.0f);\n"
+	"   return float4(fontTexture.Sample( fontSampler, fDist ).xyz, 1.0);\n"
+	"}\n";
+
+/**
+* Simple enumeration of available pixel shaders.
+***/
+enum PixelShaderTechnique
+{
+     SideBySide,
+     WarpSimple,
+	 DistortSimple,
+};
 
 /**
 * Sets the first render target by swap chain.
@@ -169,15 +243,29 @@ HRESULT Create2DVertexShader(ID3D11Device* pcDevice, ID3D11VertexShader** ppcVer
 /**
 * Creates a simple pixel shader
 ***/
-HRESULT CreateSimplePixelShader(ID3D11Device* pcDevice, ID3D11PixelShader** ppcPixelShader)
+HRESULT CreateSimplePixelShader(ID3D11Device* pcDevice, ID3D11PixelShader** ppcPixelShader, PixelShaderTechnique eTechnique)
 {
 	if ((!pcDevice) || (!ppcPixelShader)) return E_INVALIDARG;
 
 	ID3D10Blob* pcShader;
 	HRESULT hr;
+	
+	// compile selecting technique
+	switch (eTechnique)
+	{
+		case SideBySide:
+			hr = D3DX10CompileFromMemory(PS2D, strlen(PS2D), NULL, NULL, NULL, "PS", "ps_4_0", NULL, NULL, NULL, &pcShader, NULL, NULL);
+			break;
+		case WarpSimple:
+			hr = D3DX10CompileFromMemory(PS_WARP_SIMPLE, strlen(PS_WARP_SIMPLE), NULL, NULL, NULL, "PS", "ps_4_0", NULL, NULL, NULL, &pcShader, NULL, NULL);
+			break;
+		case DistortSimple:
+			hr = D3DX10CompileFromMemory(PS_DIST_SIMPLE, strlen(PS_DIST_SIMPLE), NULL, NULL, NULL, "PS", "ps_4_0", NULL, NULL, NULL, &pcShader, NULL, NULL);
+			break;
+	}
 
-	// compile and create shader
-	if (SUCCEEDED(hr = D3DX10CompileFromMemory(PS2D, strlen(PS2D), NULL, NULL, NULL, "PS", "ps_4_0", NULL, NULL, NULL, &pcShader, NULL, NULL)))
+	// succeded ?
+	if (SUCCEEDED(hr))
 	{
 		OutputDebugString(L"HelloWorldDx10 Node : Pixel Shader compiled !");
 		pcDevice->CreatePixelShader(pcShader->GetBufferPointer(), pcShader->GetBufferSize(), NULL, ppcPixelShader);
