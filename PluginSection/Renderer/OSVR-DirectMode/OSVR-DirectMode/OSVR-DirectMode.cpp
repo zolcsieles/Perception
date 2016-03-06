@@ -37,7 +37,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include"OSVR-DirectMode.h"
 
-#define INTERFACE_IDIRECT3DDEVICE9           8
+#define INTERFACE_IDIRECT3DDEVICE9                                           8
+#define INTERFACE_IDXGISWAPCHAIN                                             29
+
+#define METHOD_IDXGISWAPCHAIN_PRESENT                                        8
+
+#pragma region OSVR_DirectMode static fields
+ID3D11VertexShader* OSVR_DirectMode::m_pcVertexShader11;
+ID3D11PixelShader* OSVR_DirectMode::m_pcPixelShader11;
+ID3D11InputLayout* OSVR_DirectMode::m_pcVertexLayout11;
+ID3D11Buffer* OSVR_DirectMode::m_pcVertexBuffer11;
+ID3D11Buffer* OSVR_DirectMode::m_pcConstantBufferDirect11;
+ID3D11SamplerState* OSVR_DirectMode::m_pcSamplerState;
+OSVR_DirectMode::StereoTextureViews OSVR_DirectMode::m_sStereoTextureViews;
+#pragma endregion
 
 /**
 * Constructor.
@@ -45,6 +58,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 OSVR_DirectMode::OSVR_DirectMode() :AQU_Nodus(),
 m_pcRenderManager(nullptr)
 {
+	m_pcVertexShader11 = nullptr;
+	m_pcPixelShader11 = nullptr;
+	m_pcVertexLayout11 = nullptr;
+	m_pcVertexBuffer11 = nullptr;
+	m_pcConstantBufferDirect11 = nullptr;
+	m_pcSamplerState = nullptr;
+	m_sStereoTextureViews.m_ppcTexView11[0] = nullptr;
+	m_sStereoTextureViews.m_ppcTexView11[1] = nullptr;
 }
 
 /**
@@ -52,6 +73,8 @@ m_pcRenderManager(nullptr)
 ***/
 OSVR_DirectMode::~OSVR_DirectMode()
 {
+	if (m_pcVertexShader11) m_pcVertexShader11->Release();
+	if (m_pcPixelShader11) m_pcPixelShader11->Release();
 }
 
 /**
@@ -100,46 +123,59 @@ HBITMAP OSVR_DirectMode::GetControl()
 }
 
 /**
-* Provides the name of the requested commander.
+* Provides the name of the requested decommander.
 ***/
-LPWSTR OSVR_DirectMode::GetCommanderName(DWORD dwCommanderIndex)
+LPWSTR OSVR_DirectMode::GetDecommanderName(DWORD dwDecommanderIndex)
 {
-	//switch ((OSVR_Commanders)dwCommanderIndex)
+	switch ((OSVR_Decommanders)dwDecommanderIndex)
 	{
+		case OSVR_Decommanders::LeftTexture:
+			return L"Left Texture";
+		case OSVR_Decommanders::RightTexture:
+			return L"Right Texture";
 	}
 
 	return L"";
 }
 
 /**
-* Provides the type of the requested commander.
+* Returns the plug type for the requested decommander.
 ***/
-DWORD OSVR_DirectMode::GetCommanderType(DWORD dwCommanderIndex)
+DWORD OSVR_DirectMode::GetDecommanderType(DWORD dwDecommanderIndex)
 {
-	//switch ((OSVR_Commanders)dwCommanderIndex)
+	switch ((OSVR_Decommanders)dwDecommanderIndex)
 	{
+		case OSVR_Decommanders::LeftTexture:
+			return NOD_Plugtype::AQU_PNT_ID3D11SHADERRESOURCEVIEW;
+		case OSVR_Decommanders::RightTexture:
+			return NOD_Plugtype::AQU_PNT_ID3D11SHADERRESOURCEVIEW;
 	}
 
 	return 0;
 }
 
 /**
-* Provides the pointer of the requested commander.
+* Sets the input pointer for the requested decommander.
 ***/
-void* OSVR_DirectMode::GetOutputPointer(DWORD dwCommanderIndex)
+void OSVR_DirectMode::SetInputPointer(DWORD dwDecommanderIndex, void* pData)
 {
-	//switch ((OSVR_Commanders)dwCommanderIndex)
+	switch ((OSVR_Decommanders)dwDecommanderIndex)
 	{
+		case OSVR_Decommanders::LeftTexture:
+			m_sStereoTextureViews.m_ppcTexView11[0] = (ID3D11ShaderResourceView**)pData;
+			break;
+		case OSVR_Decommanders::RightTexture:
+			m_sStereoTextureViews.m_ppcTexView11[1] = (ID3D11ShaderResourceView**)pData;
+			break;
 	}
-
-	return nullptr;
 }
 
 /**
-* DirectMode supports any calls.
+* DirectMode supports IDXGISwapChain->Present().
 ***/
 bool OSVR_DirectMode::SupportsD3DMethod(int nD3DVersion, int nD3DInterface, int nD3DMethod)
 {
+	// TODO !! ->Present() only
 	return true;
 }
 
@@ -148,18 +184,44 @@ bool OSVR_DirectMode::SupportsD3DMethod(int nD3DVersion, int nD3DInterface, int 
 ***/
 void* OSVR_DirectMode::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3DMethod, DWORD dwNumberConnected, int& nProvokerIndex)
 {
+	if (eD3DInterface != INTERFACE_IDXGISWAPCHAIN) return nullptr;
+	if (eD3DMethod != METHOD_IDXGISWAPCHAIN_PRESENT) return nullptr;
+
 	// Get an OSVR client context to use to access the devices
 	// that we need.
 	static osvr::clientkit::ClientContext m_pcClientContext = osvr::clientkit::ClientContext(
 		"com.mtbs3d.vireio.osvr.directmode");
 
 	if (m_pcRenderManager == nullptr)
-	{		
+	{
+		// TODO !!! ADD -> if (D3D11)... else if (D3D10)...
+
+		// get device and context
+		ID3D11Device* pcDevice = nullptr;
+		ID3D11DeviceContext* pcContext = nullptr;
+		if (FAILED(GetDeviceAndContext((IDXGISwapChain*)pThis, &pcDevice, &pcContext)))
+		{
+			OutputDebugString(L"OSVR-DirectMode: Failed to get d3d11 device + context");
+			// release frame texture+view
+			if (pcDevice) { pcDevice->Release(); pcDevice = nullptr; }
+			if (pcContext) { pcContext->Release(); pcContext = nullptr; }
+			return nullptr;
+		}
+
+		// Put the device and context into a structure to let RenderManager
+		// know to use this one rather than creating its own.
+		osvr::renderkit::GraphicsLibrary cLibrary;
+		cLibrary.D3D11 = new osvr::renderkit::GraphicsLibraryD3D11;
+		cLibrary.D3D11->device = pcDevice;
+		cLibrary.D3D11->context = pcContext;
+		if (pcDevice) { pcDevice->Release(); pcDevice = nullptr; }
+		if (pcContext) { pcContext->Release(); pcContext = nullptr; }
+
 		// Open Direct3D and set up the context for rendering to
 		// an HMD.  Do this using the OSVR RenderManager interface,
 		// which maps to the nVidia or other vendor direct mode
 		// to reduce the latency.
-		m_pcRenderManager = osvr::renderkit::createRenderManager(m_pcClientContext.get(), "Direct3D11");
+		m_pcRenderManager = osvr::renderkit::createRenderManager(m_pcClientContext.get(), "Direct3D11", cLibrary);
 
 		if ((m_pcRenderManager == nullptr) || (!m_pcRenderManager->doingOkay()))
 		{
@@ -184,10 +246,48 @@ void* OSVR_DirectMode::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3
 			{
 				OutputDebugString(L"Attempted to run a Direct3D11 program with a config file that specified a different renderling library.");
 			}
+
+			// Do a call to get the information we need to construct our
+			// color and depth render-to-texture buffers.
+			std::vector<osvr::renderkit::RenderInfo> asRenderInfo;
+			m_pcClientContext.update();
+			asRenderInfo = m_pcRenderManager->GetRenderInfo();
+
+			// Create the sampler state
+			D3D11_SAMPLER_DESC sSampDesc;
+			ZeroMemory(&sSampDesc, sizeof(sSampDesc));
+			sSampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+			sSampDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+			sSampDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+			sSampDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+			sSampDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+			sSampDesc.MinLOD = 0;
+			sSampDesc.MaxLOD = D3D11_FLOAT32_MAX;
+			if (FAILED(asRenderInfo[0].library.D3D11->device->CreateSamplerState(&sSampDesc, &m_pcSamplerState)))
+				OutputDebugString(L"Failed to create Sampler State.");
 		}
 	}
 	else
 	{
+		// get device and context
+		ID3D11Device* pcDevice = nullptr;
+		ID3D11DeviceContext* pcContext = nullptr;
+		if (FAILED(GetDeviceAndContext((IDXGISwapChain*)pThis, &pcDevice, &pcContext)))
+		{
+			OutputDebugString(L"OSVR-DirectMode: Failed to get d3d11 device + context");
+			// release frame texture+view
+			if (pcDevice) { pcDevice->Release(); pcDevice = nullptr; }
+			if (pcContext) { pcContext->Release(); pcContext = nullptr; }
+			return nullptr;
+		}
+
+		// backup all states
+		D3DX11_STATE_BLOCK sStateBlock;
+		CreateStateblock(pcContext, &sStateBlock);
+
+		// clear all states
+		pcContext->ClearState();
+
 		// Update the context so we get our callbacks called and
 		// update tracker state.
 		m_pcClientContext.update();
@@ -196,6 +296,12 @@ void* OSVR_DirectMode::Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3
 		{
 			OutputDebugString(L"Render() returned false, maybe because it was asked to quit");
 		}
+
+		// set back device
+		ApplyStateblock(pcContext, &sStateBlock);
+
+		if (pcDevice) { pcDevice->Release(); pcDevice = nullptr; }
+		if (pcContext) { pcContext->Release(); pcContext = nullptr; }
 	}
 	return nullptr;
 }
@@ -242,6 +348,8 @@ void OSVR_DirectMode::SetupDisplay(void* userData, osvr::renderkit::GraphicsLibr
 void OSVR_DirectMode::DrawWorld(void* userData, osvr::renderkit::GraphicsLibrary cLibrary, osvr::renderkit::RenderBuffer cBuffers,
 	osvr::renderkit::OSVR_ViewportDescription sViewport, OSVR_PoseState pose, osvr::renderkit::OSVR_ProjectionMatrix sProjection, OSVR_TimeValue deadline)
 {
+	static int nEye = 0;
+
 	// Make sure our pointers are filled in correctly.  The config file selects
 	// the graphics library to use, and may not match our needs.
 	if (cLibrary.D3D11 == nullptr)
@@ -256,5 +364,77 @@ void OSVR_DirectMode::DrawWorld(void* userData, osvr::renderkit::GraphicsLibrary
 	}
 
 	// auto pcContext = cLibrary.D3D11->context;
-	// auto device = cLibrary.D3D11->device;
+	auto pcDevice = cLibrary.D3D11->device;
+	auto pcContext = cLibrary.D3D11->context;
+
+	// create all bool
+	bool bAllCreated = true;
+
+	// create vertex shader
+	if (!m_pcVertexShader11)
+	{
+		if (FAILED(Create2DVertexShader(pcDevice, &m_pcVertexShader11, &m_pcVertexLayout11)))
+		{
+			OutputDebugString(L"FAILED");
+			bAllCreated = false;
+		}
+	}
+	// create pixel shader... 
+	if (!m_pcPixelShader11)
+	{
+		if (FAILED(CreateSimplePixelShader(pcDevice, &m_pcPixelShader11, PixelShaderTechnique::FullscreenChangeAspectRatio)))
+			bAllCreated = false;
+	}
+	// Create vertex buffer
+	if (!m_pcVertexBuffer11)
+	{
+		if (FAILED(CreateFullScreenVertexBuffer(pcDevice, &m_pcVertexBuffer11)))
+			bAllCreated = false;
+	}
+	// create constant buffer
+	if (!m_pcConstantBufferDirect11)
+	{
+		if (FAILED(CreateMatrixConstantBuffer(pcDevice, &m_pcConstantBufferDirect11)))
+			bAllCreated = false;
+	}
+	// sampler ?
+	if (!m_pcSamplerState)
+	{
+		bAllCreated = false;
+	}
+
+
+	if ((bAllCreated) && (m_sStereoTextureViews.m_ppcTexView11[nEye]))
+	{
+		// Set the input layout
+		pcContext->IASetInputLayout(m_pcVertexLayout11);
+
+		// Set vertex buffer
+		UINT stride = sizeof(TexturedVertex);
+		UINT offset = 0;
+		pcContext->IASetVertexBuffers(0, 1, &m_pcVertexBuffer11, &stride, &offset);
+
+		// Set constant buffer, first update it... scale and translate the left and right image
+		D3DXMATRIX sProj;
+		D3DXMatrixIdentity(&sProj);
+		pcContext->UpdateSubresource((ID3D11Resource*)m_pcConstantBufferDirect11, 0, NULL, &sProj, 0, 0);
+		pcContext->VSSetConstantBuffers(0, 1, &m_pcConstantBufferDirect11);
+
+		// Set primitive topology
+		pcContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+		// set texture, sampler state
+		pcContext->PSSetShaderResources(0, 1, m_sStereoTextureViews.m_ppcTexView11[nEye]);
+		pcContext->PSSetSamplers(0, 1, &m_pcSamplerState);
+
+		// set shaders
+		pcContext->VSSetShader(m_pcVertexShader11, 0, 0);
+		pcContext->PSSetShader(m_pcPixelShader11, 0, 0);
+
+		// Render a triangle
+		pcContext->Draw(6, 0);
+
+		// switch eye for next call
+		nEye = !nEye;
+	}
 }

@@ -41,8 +41,26 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma comment(lib, "osvrClientKit.lib")
 #pragma comment(lib, "osvrRenderManager.lib")
 
+#include <d3d11_1.h>
+#pragma comment(lib, "d3d11.lib")
+
 #include <d3d11.h>
 #pragma comment(lib, "d3d11.lib")
+
+#include <d3d10_1.h>
+#pragma comment(lib, "d3d10_1.lib")
+
+#include <d3d10.h>
+#pragma comment(lib, "d3d10.lib")
+
+#include <d3dx10.h>
+#pragma comment(lib, "d3dx10.lib")
+
+#include <d3d9.h>
+#pragma comment(lib, "d3d9.lib")
+
+#include <d3dx9.h>
+#pragma comment(lib, "d3dx9.lib")
 
 // This must come after we include <d3d11.h> so its pointer types are defined.
 #include <osvr/RenderKit/GraphicsLibraryD3D11.h>
@@ -50,17 +68,31 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include"AQU_Nodus.h"
 #include"Resources.h"
 
+#include"..\..\..\Include\Vireio_DX11Basics.h"
+#include"..\..\..\Include\Vireio_Node_Plugtypes.h"
+
+
 #define PNT_FLOAT_PLUG_TYPE                          104
 #define PNT_INT_PLUG_TYPE                            107 
 #define PNT_UINT_PLUG_TYPE                           112
 
 #define NUMBER_OF_COMMANDERS                           0
+#define NUMBER_OF_DECOMMANDERS                         2
 
 /**
 * Node Commander Enumeration.
 ***/
 enum OSVR_Commanders
 {};
+
+/**
+* Node Decommander Enumeration.
+***/
+enum OSVR_Decommanders
+{
+	LeftTexture,
+	RightTexture,
+};
 
 /**
 * Vireio Open Source VR DirectMode Node Plugin.
@@ -79,10 +111,10 @@ public:
 	virtual HBITMAP         GetControl();
 	virtual DWORD           GetNodeWidth() { return 4 + 256 + 4; }
 	virtual DWORD           GetNodeHeight() { return 128; }
-	virtual DWORD           GetCommandersNumber() { return NUMBER_OF_COMMANDERS; }
-	virtual LPWSTR          GetCommanderName(DWORD dwCommanderIndex);
-	virtual DWORD           GetCommanderType(DWORD dwCommanderIndex);
-	virtual void*           GetOutputPointer(DWORD dwCommanderIndex);
+	virtual DWORD           GetDecommandersNumber() { return NUMBER_OF_DECOMMANDERS; }
+	virtual LPWSTR          GetDecommanderName(DWORD dwDecommanderIndex);
+	virtual DWORD           GetDecommanderType(DWORD dwDecommanderIndex);
+	virtual void            SetInputPointer(DWORD dwDecommanderIndex, void* pData);
 	virtual bool            SupportsD3DMethod(int nD3DVersion, int nD3DInterface, int nD3DMethod);
 	virtual void*           Provoke(void* pThis, int eD3D, int eD3DInterface, int eD3DMethod, DWORD dwNumberConnected, int& nProvokerIndex);
 private:
@@ -96,6 +128,38 @@ private:
 	* The OSVR render manager.
 	***/
 	osvr::renderkit::RenderManager* m_pcRenderManager;
+	/**
+	* The 2D vertex shader.
+	***/
+	static ID3D11VertexShader* m_pcVertexShader11;
+	/**
+	* The 2D pixel shader.
+	***/
+	static ID3D11PixelShader* m_pcPixelShader11;
+	/**
+	* The 2D vertex layout.
+	***/
+	static ID3D11InputLayout* m_pcVertexLayout11;
+	/**
+	* The 2D vertex buffer.
+	***/
+	static ID3D11Buffer* m_pcVertexBuffer11;
+	/**
+	* The constant buffer for the vertex shader matrix.
+	* Contains only ProjView matrix.
+	***/
+	static ID3D11Buffer* m_pcConstantBufferDirect11;
+	/**
+	* Basic sampler state.
+	***/
+	static ID3D11SamplerState* m_pcSamplerState;
+	/**
+	* Stereo Textures input. (DX11)
+	***/
+	static struct StereoTextureViews
+	{
+		ID3D11ShaderResourceView** m_ppcTexView11[2];
+	} m_sStereoTextureViews;
 };
 
 /**
