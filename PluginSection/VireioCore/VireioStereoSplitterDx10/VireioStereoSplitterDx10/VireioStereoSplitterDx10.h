@@ -209,7 +209,7 @@ private:
 
 	/*** StereoSplitter private D3D10+ methods ***/
 	void                    OMSetRenderTargets(IUnknown* pcDeviceOrContext, UINT NumViews, IUnknown *const *ppRenderTargetViews, IUnknown *pDepthStencilView);
-	void                    CSSetUnorderedAccessViews(UINT dwStartSlot, UINT dwNumUAVs, ID3D11UnorderedAccessView *const *ppcUnorderedAccessViews, const UINT *pdwUAVInitialCounts);
+	void                    CSSetUnorderedAccessViews(ID3D11DeviceContext* pcContext, UINT dwStartSlot, UINT dwNumUAVs, ID3D11UnorderedAccessView *const *ppcUnorderedAccessViews, const UINT *pdwUAVInitialCounts);
 	void                    XSSetShaderResourceViews(std::vector<ID3D11ShaderResourceView*> &apcActiveShaderResourceViews, UINT& unNumViewsTotal, UINT unStartSlot, UINT unNumViews, ID3D11ShaderResourceView *const *ppShaderResourceViews);
 
 	/*** StereoSplitter private methods ***/
@@ -458,54 +458,6 @@ private:
 	* A needless field of "-1" UINTs needed for CSSetUnorderedAccessViews.
 	***/
 	UINT m_aunMinusOne[D3D11_PS_CS_UAV_REGISTER_COUNT];
-
-	/*** Optional draw operation fields ***/
-
-	/**
-	* The back buffer render target view (DX11).
-	***/
-	ID3D11RenderTargetView* m_pcBackBufferView;
-	/**
-	* The 2D vertex shader.
-	***/
-	union
-	{
-		ID3D10VertexShader* m_pcVertexShader10;
-		ID3D11VertexShader* m_pcVertexShader11;
-	};
-	/**
-	* The 2D pixel shader.
-	***/
-	union
-	{
-		ID3D10PixelShader* m_pcPixelShader10;
-		ID3D11PixelShader* m_pcPixelShader11;
-	};
-	/**
-	* The 2D vertex layout.
-	***/
-	union
-	{
-		ID3D10InputLayout* m_pcVertexLayout10;
-		ID3D11InputLayout* m_pcVertexLayout11;
-	};
-	/**
-	* The 2D vertex buffer.
-	***/
-	union
-	{
-		ID3D10Buffer* m_pcVertexBuffer10;
-		ID3D11Buffer* m_pcVertexBuffer11;
-	};
-	/**
-	* The constant buffer for the vertex shader matrix.
-	* Contains only ProjView matrix.
-	***/
-	union
-	{
-		ID3D10Buffer* m_pcConstantBufferDirect10;
-		ID3D11Buffer* m_pcConstantBufferDirect11;
-	};
 };
 
 /**

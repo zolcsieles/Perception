@@ -2,9 +2,8 @@
 Vireio Perception: Open-Source Stereoscopic 3D Driver
 Copyright (C) 2012 Andres Hernandez
 
-File <MatrixOrthoSquashHud.h> and
-Class <MatrixOrthoSquashHud> :
-Copyright (C) 2013 Denis Reischl
+File <MatrixShadowFix1.h> :
+Copyright (C) 2016 Denis Reischl
 
 Vireio Perception Version History:
 v1.0.0 2012 by Andres Hernandez
@@ -12,6 +11,8 @@ v1.0.X 2013 by John Hicks, Neil Schneider
 v1.1.x 2013 by Primary Coding Author: Chris Drain
 Team Support: John Hicks, Phil Larkson, Neil Schneider
 v2.0.x 2013 by Denis Reischl, Neil Schneider, Joshua Brown
+v2.0.4 to v3.0.x 2014-2015 by Grant Bagwell, Simon Brown and Neil Schneider
+v4.0.x 2015 by Denis Reischl, Grant Bagwell, Simon Brown and Neil Schneider
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Lesser General Public License as published by
@@ -27,11 +28,11 @@ You should have received a copy of the GNU Lesser General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ********************************************************************/
 
-#ifndef MATRIXORTHOSQUASHHUD_H_INCLUDED
-#define MATRIXORTHOSQUASHHUD_H_INCLUDED
+#ifndef MATRIXSHADOWFIX1_H_INCLUDED
+#define MATRIXSHADOWFIX1_H_INCLUDED
 /**
-* @file MatrixOrthoSquashHud.h
-* Contains shader modification to squash orthographic matrices, only HUD matrices here.
+* @file MatrixShadowFix1.h
+* Translation and negative rotation (game-specific).
 */
 
 #include "d3d9.h"
@@ -41,10 +42,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "ShaderMatrixModification.h"
 
 /**
-* Squishes the matrix if orthographical, otherwise simple modification.
-* All orthographic matrices treated as HUD here.
+* Translation and negative rotation (game-specific).
 */
-class MatrixOrthoSquashHud : public ShaderMatrixModification
+class MatrixShadowFix1 : public ShaderMatrixModification
 {
 public:
 	/**
@@ -53,35 +53,25 @@ public:
 	* @param adjustmentMatrices The matricies to be adjusted
 	* @param transpose Decides if the matrices should be transposed (aka: have rows and columns interchanged)
 	*/
-	MatrixOrthoSquashHud(UINT modID, std::shared_ptr<ViewAdjustment> adjustmentMatrices, bool transpose)
+	MatrixShadowFix1(UINT modID, std::shared_ptr<ViewAdjustment> adjustmentMatrices, bool transpose)
 		: ShaderMatrixModification(modID, adjustmentMatrices, transpose)
 	{};
 
 	/**
-	* Matrix modification does multiply: shiftprojection * squash (for GUI), scale * transform * distance (for HUD).
-	* Does the matrix squash and outputs the results.  Does only affect HUD (or GUI).
 	* @param in The matrix to be multiply by the adjustmentMatrices.
 	* @param[out] outLeft The resulting left side matrix
 	* @param[out] outRight The resulting right side matrix
 	***/
 	virtual void DoMatrixModification(D3DXMATRIX in, D3DXMATRIX& outLeft, D3DXMATRIX& outright)
 	{
-#ifdef VIREIO_MATRIX_MODIFIER
-		if (fabs(in[15] - 1.0f) < 0.00001f)
-#else
-		if (vireio::AlmostSame(in[15], 1.0f, 0.00001f)) 
-#endif
-		{
+		D3DXMATRIX sTranslateLeft;
+		D3DXMATRIX sTranslateRight;
+		D3DXMatrixTranslation(&sTranslateLeft, 1.5f * m_spAdjustmentMatrices->Configuration()->fWorldScaleFactor, 0.0f, 0.0f);
+		D3DXMatrixTranslation(&sTranslateRight, -1.5f * m_spAdjustmentMatrices->Configuration()->fWorldScaleFactor, 0.0f, 0.0f);
 
-			// HUD
-			// separation -> distance translation
-			outLeft = in * m_spAdjustmentMatrices->LeftHUDMatrix();
-			outright = in * m_spAdjustmentMatrices->RightHUDMatrix();
-
-		}
-		else {
-			ShaderMatrixModification::DoMatrixModification(in, outLeft, outright);
-		}
+		// in * rollMatrix
+		outLeft = in * sTranslateLeft * m_spAdjustmentMatrices->RollMatrixNegative();
+		outright = in * sTranslateRight * m_spAdjustmentMatrices->RollMatrixNegative();
 	};
 };
 #endif

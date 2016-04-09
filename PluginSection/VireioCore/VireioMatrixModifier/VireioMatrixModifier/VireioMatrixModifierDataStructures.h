@@ -48,6 +48,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include<vector>
 
 #include"..\..\..\Include\Vireio_GUIDs.h"
+#ifdef VIREIO_MATRIX_MODIFIER
+#include"..\..\..\..\DxProxy\DxProxy\ShaderConstantModificationFactory.h"
+#endif
 
 #define VIREIO_MAX_VARIABLE_NAME_LENGTH      64  /**< We restrict variable names to 64 characters. ***/
 #define VIREIO_CONSTANT_RULES_NOT_ADDRESSED - 1  /**< No shader rules addressed for this shader. ***/
@@ -81,7 +84,7 @@ inline DWORD GetHashCode(BYTE* pcData, DWORD dwSize)
 * @param pInitialData Pointer to the initial data, NULL if bCopyData is true.
 * @param bCopyData True if data from main buffer is to be copied to stereo buffers.
 ***/
-inline void CreateStereoConstantBuffer(ID3D11Device* pcDevice, ID3D11DeviceContext* pcContext, ID3D11Buffer* pcBuffer, D3D11_BUFFER_DESC *pDesc, D3D11_SUBRESOURCE_DATA *pInitialData, bool bCopyData)
+inline void CreateStereoBuffer(ID3D11Device* pcDevice, ID3D11DeviceContext* pcContext, ID3D11Buffer* pcBuffer, D3D11_BUFFER_DESC *pDesc, D3D11_SUBRESOURCE_DATA *pInitialData, bool bCopyData)
 {
 	// create right buffer
 	ID3D11Buffer* pcBufferRight = nullptr;
@@ -116,6 +119,7 @@ inline void CreateStereoConstantBuffer(ID3D11Device* pcDevice, ID3D11DeviceConte
 }
 #pragma endregion
 
+#ifdef VIREIO_MATRIX_MODIFIER
 /**
 * Constant modification rule (v4+) normalized.
 ***/
@@ -264,7 +268,12 @@ struct Vireio_Constant_Modification_Rule
 	* True if input matrix should be transposed before modifying (and transposed back after).
 	***/
 	bool m_bTranspose;
+	/**
+	* The eventual modification class. (created by m_dwOperationToApply index)
+	***/
+	std::shared_ptr<ShaderConstantModification<>> m_pcModification;
 };
+#endif
 
 /**
 * Shader-specific constant rule index.

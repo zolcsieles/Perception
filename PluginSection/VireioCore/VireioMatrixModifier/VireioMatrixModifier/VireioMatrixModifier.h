@@ -85,7 +85,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define METHOD_REPLACEMENT                         false                     /**< This node does NOT replace the D3D call (default) **/
 
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
-#define NUMBER_OF_COMMANDERS                          12
+#define NUMBER_OF_COMMANDERS                          13
 #define NUMBER_OF_DECOMMANDERS                        53
 #define GUI_WIDTH                                   1024                      
 #define GUI_HEIGHT                                  5000               
@@ -123,6 +123,7 @@ enum STS_Commanders
 	dwVerifyConstantBuffers,                                                /**< Connect this commander to the stereo splitter to verify constant buffers ***/
 	asVShaderData,                                                          /**< The shader data vector. ***/
 	asPShaderData,                                                          /**< The shader data vector. ***/
+	ViewAdjustments,                                                        /**< Shared pointer to the view adjustment class. ***/
 #elif defined(VIREIO_D3D9)
 #endif
 };
@@ -153,10 +154,6 @@ enum STS_Decommanders
 	NumBuffers_VertexShader,                 /**< ID3D10Device/ID3D11DeviceContext::XSSetConstantBuffers ***/
 	ppConstantBuffers_DX10_VertexShader,     /**< ID3D10Device/ID3D11DeviceContext::XSSetConstantBuffers ***/
 	ppConstantBuffers_DX11_VertexShader,     /**< ID3D10Device/ID3D11DeviceContext::XSSetConstantBuffers ***/
-	//StartSlot_PixelShader,                   /**< ID3D10Device/ID3D11DeviceContext::PSSetConstantBuffers ***/
-	//NumBuffers_PixelShader,                  /**< ID3D10Device/ID3D11DeviceContext::PSSetConstantBuffers ***/
-	//ppConstantBuffers_DX10_PixelShader,      /**< ID3D10Device/ID3D11DeviceContext::PSSetConstantBuffers ***/
-	//ppConstantBuffers_DX11_PixelShader,      /**< ID3D10Device/ID3D11DeviceContext::PSSetConstantBuffers ***/
 	pDstResource_DX10,                       /**< ID3D10Device/ID3D11DeviceContext::UpdateSubresource ***/
 	pDstResource_DX11,                       /**< ID3D10Device/ID3D11DeviceContext::UpdateSubresource ***/
 	DstSubresource,                          /**< ID3D10Device/ID3D11DeviceContext::UpdateSubresource ***/
@@ -184,10 +181,6 @@ enum STS_Decommanders
 	NumBuffers_Get_VertexShader,             /**< ID3D10Device/ID3D11DeviceContext::XSGetConstantBuffers ***/
 	ppConstantBuffers_DX10_Get_VertexShader, /**< ID3D10Device/ID3D11DeviceContext::XSGetConstantBuffers ***/
 	ppConstantBuffers_DX11_Get_VertexShader, /**< ID3D10Device/ID3D11DeviceContext::XSGetConstantBuffers ***/
-	//StartSlot_Get_PixelShader,               /**< ID3D10Device/ID3D11DeviceContext::PSGetConstantBuffers ***/
-	//NumBuffers_Get_PixelShader,              /**< ID3D10Device/ID3D11DeviceContext::PSGetConstantBuffers ***/
-	//ppConstantBuffers_DX10_Get_PixelShader,  /**< ID3D10Device/ID3D11DeviceContext::PSGetConstantBuffers ***/
-	//ppConstantBuffers_DX11_Get_PixelShader,  /**< ID3D10Device/ID3D11DeviceContext::PSGetConstantBuffers ***/
 	pResource,                               /**< ID3D11DeviceContext::Map ***/
 	Subresource,                             /**< ID3D11DeviceContext::Map ***/
 	MapType,                                 /**< ID3D11DeviceContext::Map ***/
@@ -374,14 +367,14 @@ private:
 	void VerifyConstantBuffer(ID3D11Buffer *pcBuffer, UINT dwBufferIndex);
 	void DoBufferModification(INT nRulesIndex, UINT_PTR pdwLeft, UINT_PTR pdwRight, UINT dwBufferSize);
 #endif
-#if defined(VIREIO_D3D9)
-#endif
 	void DebugOutput(const void *pvSrcData, UINT dwShaderIndex, UINT dwBufferIndex, UINT dwBufferSize);
 	void CreateGUI();
 	void FillShaderRuleIndices();
 	void FillShaderRuleData(UINT dwRuleIndex);
 	void FillShaderRuleGeneralIndices();
+#if defined(VIREIO_D3D9)
 	void FillShaderRuleShaderIndices();
+#endif
 
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
 	/*** MatrixModifier input pointers ***/
@@ -572,7 +565,7 @@ private:
 	* View matrix adjustment class.
 	* @see ViewAdjustment
 	**/
-	ViewAdjustment* m_pcShaderViewAdjustment;
+	std::shared_ptr<ViewAdjustment> m_pcShaderViewAdjustment;
 	/**
 	* The game configuration for the current game.
 	***/
@@ -663,7 +656,6 @@ private:
 		UINT m_dwRuleIndices;                       /**< [List] List of all created shader rules **/
 		UINT m_dwRuleData;                          /**< [List] Data output for the chosen rule **/
 		UINT m_dwGeneralIndices;                    /**< [List] All general indices **/
-		UINT m_dwShaderIndices;                     /**< [List] All shader-specific indices **/
 
 #if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
 		UINT m_dwConstantName;                      /**< [Switch] Shader constant name **/
@@ -680,6 +672,7 @@ private:
 		UINT m_dwDeleteLatest;                      /**< [Button] Delete latest rule **/
 		UINT m_dwAddGeneral;                        /**< [Button] Add to general indices **/
 		UINT m_dwDeleteGeneral;                     /**< [Button] Delete chosen general index **/
+		UINT m_dwBufferIndexDebug;                  /**< [Switch] : Activate to output all possible buffer sizes to the debug trace for the index in m_dwBufferIndex.***/
 
 		// string entries for the switches above
 		std::wstring m_szConstantName;
@@ -697,6 +690,8 @@ private:
 		bool m_bTranspose;
 		UINT m_dwOperationValue;
 		UINT m_dwRegCountValue;
+#elif defined(VIREIO_D3D9)
+		UINT m_dwShaderIndices;                     /**< [List] All shader-specific indices **/
 #endif
 	} m_sPageGameShaderRules;
 	/**
@@ -777,10 +772,6 @@ private:
 	***/
 	std::vector<std::wstring> m_aszShaderRuleGeneralIndices;
 	/**
-	* List of all shaderrule indices for the currently chosen shader on the shaders page. (std::wstring).
-	***/
-	std::vector<std::wstring> m_aszShaderRuleShaderIndices;
-	/**
 	* Debug trace string list.
 	* Contains all strings for the debug trace.
 	***/
@@ -797,6 +788,23 @@ private:
 	* True if the shader list is to be sorted.
 	***/
 	bool m_bSortShaderList;
+	
+#if defined(VIREIO_D3D11) || defined(VIREIO_D3D10)
+	/**
+	* True if the buffer index sizes ar provided to the debug trace.
+	***/
+	bool m_bBufferIndexDebug;
+	/**
+	* Vector helper for the buffer index debug output.
+	***/
+	std::vector<UINT> m_aunBufferIndexSizesDebug;
+#elif defined(VIREIO_D3D9)
+	/**
+	* List of all shaderrule indices for the currently chosen shader on the shaders page. (std::wstring).
+	* (DX9 only)
+	***/
+	std::vector<std::wstring> m_aszShaderRuleShaderIndices;
+#endif
 };
 
 /**
